@@ -215,7 +215,11 @@ iptables -F OUTPUT 2>/dev/null || true
 # Set policy to DROP — all traffic is blocked unless explicitly allowed.
 # This closes exfiltration via non-standard ports (8443, 4443, 9090, etc.)
 # and prevents reverse shells on arbitrary ports.
-iptables -P OUTPUT DROP 2>/dev/null || true
+iptables -P OUTPUT DROP 2>/dev/null || {
+    echo "   ❌ FATAL: Cannot set iptables DEFAULT-DROP policy!"
+    echo "   The container will NOT start without egress filtering."
+    exit 1
+}
 
 # ── Allow loopback (proxy <-> clients, internal services) ────────────────────
 iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
@@ -234,13 +238,25 @@ iptables -A OUTPUT -p tcp --dport 53 -j DROP 2>/dev/null || true
 # ── Allow established connections ────────────────────────────────────────────
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
 
+# ── Block cloud metadata endpoints (MUST come before private range allows) ───
+# AWS, GCP, Azure IMDS all use 169.254.169.254. Block explicitly.
+iptables -A OUTPUT -d 169.254.169.254/32 -j LOG --log-prefix "EGRESS_BLOCKED_METADATA: " --log-level 4 2>/dev/null || true
+iptables -A OUTPUT -d 169.254.169.254/32 -j DROP 2>/dev/null || true
+
 # ── Allow container-internal traffic ─────────────────────────────────────────
+# Docker default bridge: 172.17.0.0/16, user-defined: 172.18-31.x.x
 iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT 2>/dev/null || true
 iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT 2>/dev/null || true
 
 # ── Allow proxy user (Squid) to make direct outbound connections ─────────────
-iptables -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$PROXY_UID" -j ACCEPT 2>/dev/null || true
-iptables -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$PROXY_UID" -j ACCEPT 2>/dev/null || true
+iptables -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$PROXY_UID" -j ACCEPT 2>/dev/null || {
+    echo "   ❌ FATAL: Cannot add iptables rule for proxy (port 80)!"
+    exit 1
+}
+iptables -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$PROXY_UID" -j ACCEPT 2>/dev/null || {
+    echo "   ❌ FATAL: Cannot add iptables rule for proxy (port 443)!"
+    exit 1
+}
 
 # ── LOG all other blocked traffic (bypass/exfiltration detection) ────────────
 # With DEFAULT-DROP, all non-whitelisted traffic is blocked. LOG before DROP
@@ -251,6 +267,23 @@ iptables -A OUTPUT -p icmp -j LOG --log-prefix "EGRESS_BLOCKED_ICMP: " --log-lev
 
 # Note: DEFAULT-DROP policy handles the actual blocking — no explicit DROP
 # rules needed. The LOG rules above are for monitoring only.
+
+# ── IPv6: DEFAULT-DROP (prevent IPv6 egress bypass) ──────────────────────────
+# If IPv6 is available, apply the same DEFAULT-DROP policy.
+# Without this, all IPv4 firewall rules can be bypassed via IPv6.
+echo "   🔧 Configuring ip6tables (DEFAULT-DROP mode)..."
+
+if command -v ip6tables &>/dev/null; then
+    ip6tables -F OUTPUT 2>/dev/null || true
+    ip6tables -P OUTPUT DROP 2>/dev/null || true
+    ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
+    ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+    ip6tables -A OUTPUT -p tcp -j LOG --log-prefix "EGRESS_BLOCKED_IPv6_TCP: " --log-level 4 2>/dev/null || true
+    ip6tables -A OUTPUT -p udp -j LOG --log-prefix "EGRESS_BLOCKED_IPv6_UDP: " --log-level 4 2>/dev/null || true
+    echo "   ✅ ip6tables DEFAULT-DROP active"
+else
+    echo "   ℹ️  ip6tables not available (IPv6 not supported in this container)"
+fi
 
 echo "   ✅ iptables DEFAULT-DROP active (only proxy user can reach internet directly)"
 echo "   ✅ DNS restricted to container resolver: ${CONTAINER_DNS}"

@@ -1,7 +1,8 @@
 # Dockerfile – Sandboxed Dev Container (Ubuntu 24.04 + Python + Node.js)
 
 # --- Base Image (Ubuntu 24.04 LTS, non-root "vscode" user) ---
-FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
+# NOTE: Digest should be updated regularly (e.g. monthly) to pick up security patches.
+FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04@sha256:d94c97dd9cacf183d0a6fd12a8e87b526e9e928307674ae9c94139139c0c6eae
 
 
 # --- Build Arguments ---
@@ -86,6 +87,9 @@ RUN echo 'PATH="/home/vscode/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
+# --- SECURITY: Healthcheck — detect Squid proxy crashes ---
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD squid -f /etc/squid/squid.conf -k check 2>/dev/null || exit 1
 
 # --- Switch to non-root user ---
 USER vscode

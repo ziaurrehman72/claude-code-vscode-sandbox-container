@@ -115,7 +115,25 @@ Copy-Item github-copilot-vscode-sandbox-container\.gitattributes \path\to\your\p
 >
 > **Windows Tip:** For best performance, store your project inside the WSL2 filesystem (`\\wsl$\Ubuntu\home\...`) rather than on `C:\`. File access from the Windows filesystem into the container is significantly slower.
 
-#### 2. Start the container
+#### 2. Configure allowed domains
+
+The egress firewall blocks all outbound traffic except to explicitly whitelisted domains. By default, **only domains required for VS Code, GitHub Copilot, and package managers (npm, PyPI, apt) are enabled**.
+
+If your project uses additional services (Azure, Azure DevOps, Figma, Miro, Notion, etc.), you need to **uncomment the corresponding domains** in `.devcontainer/allowed-domains.conf`:
+
+```conf
+# Example: Enable Azure DevOps for the ADO MCP server
+*.dev.azure.com          # ← remove the leading "#" to enable
+
+# Example: Enable Figma API
+*.figma.com              # ← remove the leading "#" to enable
+```
+
+After editing, restart the container (`Cmd+Shift+P` / `Ctrl+Shift+P` → **"Dev Containers: Rebuild Container"**).
+
+> **⚠️ Security:** Wildcard domains (`*.example.com`) grant access to **all** subdomains, including potentially attacker-controlled ones. For example, `*.blob.core.windows.net` allows any Azure Storage account. Where possible, narrow wildcards to your specific instances (e.g., `myaccount.blob.core.windows.net`). See [Known Limitations → Wildcard Domains](#4-wildcard-domains-in-allowed-domainsconf) for details.
+
+#### 3. Start the container
 
 1. Open your project in VS Code
 2. `Cmd+Shift+P` (macOS) / `Ctrl+Shift+P` (Linux/Windows)
@@ -189,16 +207,19 @@ docker volume prune              # Remove unused volumes
 
 ### Egress Firewall: Allowing Domains
 
-The file `.devcontainer/allowed-domains.conf` defines which external domains the container can reach. The following are allowed by default:
+The file `.devcontainer/allowed-domains.conf` defines which external domains the container can reach. The following are **enabled by default** (minimum required):
 
 - **GitHub** — Copilot, Git, API
 - **npm** and **PyPI** — package installation
 - **Ubuntu Repos** — apt
 - **VS Code / Microsoft** — extensions, updates
-- **Azure** — Portal, APIs, DevOps
+
+The following are **disabled by default** (commented out) and can be enabled as needed:
+
+- **Azure** — Portal, APIs, DevOps, Storage, Key Vault
 - **Figma, Miro, Notion, Amplitude** — MCP servers
 
-To allow additional domains, add them to `allowed-domains.conf` and restart the container.
+To enable additional domains, uncomment them in `allowed-domains.conf` and restart the container. See [Quick Start Step 3](#3-configure-allowed-domains) for details and [Known Limitations → Wildcard Domains](#4-wildcard-domains-in-allowed-domainsconf) for security implications.
 
 ### Adjusting Resource Limits
 
@@ -325,15 +346,15 @@ If the container feels slow (especially `npm install`, `pip install`, or file-he
 
 ### What Is Isolated?
 
-| Area                 | Status | Explanation                                   |
-| -------------------- | ------ | --------------------------------------------- |
-| **Host Filesystem**  | ✅     | Only your project folder is visible           |
-| **SSH Keys**         | ✅     | SSH agent forwarding disabled                 |
-| **Git Credentials**  | ✅     | Short-lived cache (5 min), no host forwarding |
-| **Network (Egress)** | ✅     | Only whitelisted domains reachable            |
-| **Root Privileges**  | ✅     | sudo removed, no-new-privileges active        |
-| **Resources**        | ✅     | Memory, CPU, PID limits enforced              |
-| **Ports**            | ✅     | Only explicitly defined ports forwarded       |
+| Area                 | Status | Explanation                                    |
+| -------------------- | ------ | ---------------------------------------------- |
+| **Host Filesystem**  | ✅     | Only your project folder is visible            |
+| **SSH Keys**         | ✅     | SSH agent forwarding disabled                  |
+| **Git Credentials**  | ✅     | Short-lived cache (60 sec), no host forwarding |
+| **Network (Egress)** | ✅     | Only whitelisted domains reachable             |
+| **Root Privileges**  | ✅     | sudo removed, no-new-privileges active         |
+| **Resources**        | ✅     | Memory, CPU, PID limits enforced               |
+| **Ports**            | ✅     | Only explicitly defined ports forwarded        |
 
 ### Known Limitations
 
