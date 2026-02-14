@@ -1,0 +1,210 @@
+// =============================================================================
+// devcontainer.json – Main configuration file for VS Code Dev Containers
+// =============================================================================
+// This file tells VS Code how to build, start, and configure the development
+// container. VS Code reads it automatically when you select "Reopen in
+// Container".
+//
+// Docs: https://containers.dev/implementors/json_reference/
+// =============================================================================
+{
+  // -------------------------------------------------------------------------
+  // Name: Displayed in the VS Code status bar (bottom left) so you can
+  // tell you're working inside the container.
+  // -------------------------------------------------------------------------
+  "name": "Sandboxed Dev Environment",
+
+  // -------------------------------------------------------------------------
+  // Build: Points to the Dockerfile in the same folder.
+  // VS Code builds the image automatically on first open.
+  // "context" is the directory used as the build context
+  // (. = the .devcontainer folder itself).
+  // -------------------------------------------------------------------------
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+
+  // -------------------------------------------------------------------------
+  // runArgs: Additional arguments passed to the container runtime when
+  // starting the container. These define the sandboxing rules:
+  //
+  // --security-opt=no-new-privileges
+  //   → Prevents processes inside the container from gaining additional
+  //     privileges (e.g., via setuid binaries). Closes a common
+  //     privilege escalation vector.
+  //
+  // --cap-drop=ALL
+  //   → Removes ALL Linux capabilities (special privileges like network
+  //     configuration, loading kernel modules, etc.). The container
+  //     starts with minimal permissions.
+  //
+  // --cap-add=NET_RAW
+  //   → Re-adds ONLY the raw-socket capability. Required for DNS
+  //     resolution, pip/npm downloads, and Copilot API communication.
+  //     Without NET_RAW, no network access works.
+  //
+  // --cap-add=DAC_OVERRIDE
+  //   → Allows root to bypass file permission checks. Required by
+  //     VS Code because the VS Code Server installation runs via
+  //     "podman exec -u root" and needs access to the /vscode volume,
+  //     which belongs to a different user (UID 1000) in the rootless
+  //     Podman user namespace. Without DAC_OVERRIDE,
+  //     "mkdir /vscode/vscode-server" fails with "Permission denied".
+  //     This capability is also included in Docker's default profile.
+  //
+  // --cap-add=NET_ADMIN
+  //   → SECURITY: Required by the entrypoint to set iptables rules
+  //     for the egress firewall. Only the entrypoint (running as root)
+  //     uses this capability. Since no-new-privileges is set, child
+  //     processes (as vscode user) cannot acquire this capability.
+  //
+  // --memory=8g / --cpus=4 / --pids-limit=512
+  //   → SECURITY: Resource limits prevent denial-of-service of the
+  //     host system via fork bombs, crypto mining, or infinite loops.
+  //     Adjust based on the host's hardware.
+  // -------------------------------------------------------------------------
+  "runArgs": [
+    "--security-opt=no-new-privileges",
+    "--cap-drop=ALL",
+    "--cap-add=NET_RAW",
+    "--cap-add=DAC_OVERRIDE",
+    "--cap-add=NET_ADMIN",
+    "--memory=8g",
+    "--cpus=4",
+    "--pids-limit=512"
+  ],
+
+  // -------------------------------------------------------------------------
+  // overrideCommand: false → VS Code does NOT override the Dockerfile's
+  // CMD/ENTRYPOINT. This is necessary so that our security entrypoint
+  // (egress-firewall.sh) runs as root at container start BEFORE VS Code
+  // starts the vscode user process.
+  // -------------------------------------------------------------------------
+  "overrideCommand": false,
+
+  // -------------------------------------------------------------------------
+  // containerUser: The user under which the container entrypoint runs.
+  // Must be root so that iptables rules can be set.
+  // VS Code itself operates as "vscode" (defined by remoteUser).
+  // -------------------------------------------------------------------------
+  "containerUser": "root",
+
+  // -------------------------------------------------------------------------
+  // remoteEnv: Environment variables set/overridden inside the container.
+  // Here we disable security-relevant credential forwarding:
+  //
+  // SSH_AUTH_SOCK = ""
+  //   → Disables SSH agent forwarding from the host into the container.
+  //     Without this, processes (including AI agents) could use the
+  //     host user's SSH keys to authenticate against servers.
+  //     SECURITY: Prevents lateral movement via SSH keys.
+  //
+  // GIT_TERMINAL_PROMPT = "0"
+  //   → Disables interactive Git authentication prompts.
+  //     If credentials are missing, Git commands fail instead of
+  //     asking for a password. Reduces credential leaking risk.
+  // -------------------------------------------------------------------------
+  "remoteEnv": {
+    "SSH_AUTH_SOCK": "",
+    "GIT_TERMINAL_PROMPT": "0"
+  },
+
+  // -------------------------------------------------------------------------
+  // customizations.vscode: Everything VS Code configures inside the
+  // container.
+  // -------------------------------------------------------------------------
+  "customizations": {
+    "vscode": {
+      // ---------------------------------------------------------------------
+      // extensions: These extensions are automatically installed INSIDE
+      // THE CONTAINER (not on the host). VS Code installs them on the
+      // first container start.
+      // ---------------------------------------------------------------------
+      "extensions": [
+        // GitHub Copilot – AI autocompletion in the editor.
+        // Shows inline suggestions while typing.
+        "github.copilot",
+
+        // GitHub Copilot Chat – Chat interface in the sidebar.
+        // Enables asking Copilot about code, errors, etc.
+        "github.copilot-chat",
+
+        // Python language support (IntelliSense, debugging, linting).
+        // Required for VS Code to understand Python files.
+        "ms-python.python",
+
+        // Pylance – Fast Python language server by Microsoft.
+        // Provides type inference, autocompletion, and error detection.
+        "ms-python.vscode-pylance",
+
+        // ESLint – JavaScript/TypeScript linter.
+        // Finds errors and style issues in JS/TS code.
+        "dbaeumer.vscode-eslint",
+
+        // Prettier – Code formatter for JS/TS/JSON/CSS/HTML.
+        // Automatically formats code consistently.
+        "esbenp.prettier-vscode"
+      ],
+
+      // ---------------------------------------------------------------------
+      // settings: VS Code settings that apply ONLY inside the container.
+      // They do not override your local settings.
+      // ---------------------------------------------------------------------
+      "settings": {
+        // Default terminal in the container is zsh (with Oh My Zsh).
+        "terminal.integrated.defaultProfile.linux": "zsh",
+
+        // Path to the Python interpreter inside the container.
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+
+        // Enable automatic formatting on save.
+        "editor.formatOnSave": true,
+
+        // SECURITY: Disable SSH agent forwarding.
+        // Prevents host SSH keys from being available inside the container.
+        "remote.SSH.enableAgentForwarding": false
+      }
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // forwardPorts: Ports automatically forwarded from the container to
+  // your host. For example, if you start a dev server on port 3000
+  // inside the container, you can reach it at localhost:3000.
+  //
+  //   3000 → Typical for React/Next.js dev server
+  //   5000 → Typical for Flask
+  //   8000 → Typical for Django / FastAPI
+  //   8080 → General HTTP alternative port
+  //
+  // Adjust as needed. Ports can also be forwarded manually in VS Code:
+  // Cmd+Shift+P → "Forward a Port"
+  // -------------------------------------------------------------------------
+  "forwardPorts": [3000, 5000, 8000, 8080],
+
+  // -------------------------------------------------------------------------
+  // otherPortsAttributes: Prevents automatic port forwarding for ports
+  // not explicitly listed in forwardPorts.
+  // SECURITY: An AI agent could start an HTTP server as a C2 channel;
+  // without this setting, VS Code would auto-forward the port.
+  // -------------------------------------------------------------------------
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  },
+
+  // -------------------------------------------------------------------------
+  // postCreateCommand: Shell command run ONCE after the container is
+  // created (not on every restart!).
+  // Calls our setup script that installs Copilot CLI, among other things.
+  // -------------------------------------------------------------------------
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  // -------------------------------------------------------------------------
+  // remoteUser: The user under which VS Code operates inside the container.
+  // "vscode" is a non-root user already created in the Microsoft base
+  // image. Important for sandboxing – we NEVER work as root in the
+  // container.
+  // -------------------------------------------------------------------------
+  "remoteUser": "vscode"
+}

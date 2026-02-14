@@ -1,0 +1,81 @@
+# =============================================================================
+# .copilotignore – Files excluded from GitHub Copilot analysis
+# =============================================================================
+# Works like .gitignore: files listed here are NOT sent as context to
+# Copilot (inline suggestions + chat).
+#
+# IMPORTANT for security:
+#   Sensitive files such as credentials, private keys, environment configs,
+#   and internal documentation should be listed here to prevent Copilot
+#   from sending them to external servers (GitHub/OpenAI).
+#
+# Docs: https://docs.github.com/en/copilot/managing-copilot/managing-github-copilot-in-your-organization/setting-policies-for-copilot-in-your-organization
+# =============================================================================
+
+# ── Environment Variables & Secrets ───────────────────────────────────────────
+.env
+.env.*
+.env.local
+.env.production
+.env.staging
+*.secret
+*.secrets
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+
+# ── SSH & GPG ─────────────────────────────────────────────────────────────────
+.ssh/
+*.pub
+id_rsa
+id_ed25519
+id_ecdsa
+
+# ── Credentials & Tokens ──────────────────────────────────────────────────────
+**/credentials*
+**/token*
+**/*password*
+**/*secret*
+**/auth.json
+**/secrets.json
+**/credentials.json
+*.keystore
+
+# ── Cloud & Infrastructure Configs ─────────────────────────────────────────────
+**/.aws/
+**/.azure/
+**/.gcloud/
+**/kubeconfig*
+**/*.tfvars
+**/*.tfstate
+**/*.tfstate.backup
+
+# ── Docker/Container Secrets ───────────────────────────────────────────────────
+docker-compose.override.yml
+**/docker-secrets/
+
+# ── Databases ─────────────────────────────────────────────────────────────────
+*.sql
+*.sqlite
+*.db
+**/migrations/
+
+# ── Logs (may contain sensitive data) ─────────────────────────────────────────
+*.log
+logs/
+**/log/
+
+# ── Internal Documentation ───────────────────────────────────────────────────
+**/internal-docs/
+**/confidential/
+**/proprietary/
+
+# ── Build Artifacts & Dependencies ────────────────────────────────────────────
+node_modules/
+.venv/
+__pycache__/
+dist/
+build/
+*.pyc
