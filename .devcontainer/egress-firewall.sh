@@ -39,7 +39,12 @@ echo "   📄 Generating Squid ACL from $DOMAINS_FILE..."
 
 : > "$SQUID_ACL_FILE"  # truncate
 
+# First pass: collect all domains and convert to Squid format
+declare -A EXACT_DOMAINS  # tracks exact domains (e.g. nodejs.org)
+declare -A WILD_DOMAINS   # tracks wildcard domains (e.g. .nodejs.org)
 DOMAIN_COUNT=0
+SKIPPED=0
+
 while IFS= read -r line; do
     # Strip comments and whitespace
     line=$(echo "$line" | sed 's/#.*//' | xargs)
@@ -48,14 +53,34 @@ while IFS= read -r line; do
     # Convert to Squid dstdomain format
     if [[ "$line" == \*.* ]]; then
         # *.example.com → .example.com (Squid wildcard syntax)
-        echo ".${line#\*.}" >> "$SQUID_ACL_FILE"
+        squid_domain=".${line#\*.}"
+        base_domain="${line#\*.}"
+        # Squid 6.x FATAL: .example.com is redundant when example.com exists
+        # (dstdomain "example.com" already matches all subdomains)
+        if [[ -n "${EXACT_DOMAINS[$base_domain]:-}" ]]; then
+            echo "   ⚠️  Skipping redundant wildcard: $line (${base_domain} already covers subdomains)"
+            SKIPPED=$((SKIPPED + 1))
+            continue
+        fi
+        WILD_DOMAINS["$base_domain"]=1
+        echo "$squid_domain" >> "$SQUID_ACL_FILE"
     else
-        # example.com → exact match only (no automatic subdomain wildcard)
+        # example.com → matches exact domain + all subdomains in Squid dstdomain
+        # If .example.com wildcard was already added, remove it (exact domain subsumes it)
+        if [[ -n "${WILD_DOMAINS[$line]:-}" ]]; then
+            echo "   ⚠️  Removing redundant wildcard for: $line (exact domain covers subdomains)"
+            sed -i "/^\.$line$/d" "$SQUID_ACL_FILE"
+            SKIPPED=$((SKIPPED + 1))
+        fi
+        EXACT_DOMAINS["$line"]=1
         echo "$line" >> "$SQUID_ACL_FILE"
     fi
     DOMAIN_COUNT=$((DOMAIN_COUNT + 1))
 done < "$DOMAINS_FILE"
 
+if [ $SKIPPED -gt 0 ]; then
+    echo "   ℹ️  Deduplicated $SKIPPED overlapping domain(s) (Squid 6.x compatibility)"
+fi
 echo "   ✅ ${DOMAIN_COUNT} domains loaded into Squid ACL"
 
 # ── Generate Squid Configuration ─────────────────────────────────────────────
