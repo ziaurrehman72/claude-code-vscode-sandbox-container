@@ -18,7 +18,7 @@ This repository is a **template**. It contains a fully configured `.devcontainer
 │  │  (runs on    │    │  ┌──────────────────────┐  │ │
 │  │   your       │    │  │  Container           │  │ │
 │  │   machine)   │    │  │  • Python 3.12       │  │ │
-│  │              │    │  │  • Node.js 20        │  │ │
+│  │              │    │  │  • Node.js (nvm)     │  │ │
 │  │              │    │  │  • GitHub Copilot    │  │ │
 │  │              │    │  │  • Egress Firewall   │  │ │
 │  │              │    │  │  • your project code │  │ │
@@ -31,9 +31,9 @@ This repository is a **template**. It contains a fully configured `.devcontainer
 
 | Category         | Tools                                                          |
 | ---------------- | -------------------------------------------------------------- |
-| **Languages**    | Python 3.12, Node.js 20                                        |
+| **Languages**    | Python 3.12, Node.js 20 (via nvm — switchable)                 |
 | **Python**       | pip, poetry, black, ruff, ipython (via pipx)                   |
-| **Node.js**      | npm, TypeScript, ts-node, ESLint, Prettier                     |
+| **Node.js**      | npm, nvm (install any version with `nvm install <version>`)    |
 | **Git & GitHub** | Git                                                            |
 | **Editor**       | GitHub Copilot, Copilot Chat, Python/Pylance, ESLint, Prettier |
 | **Shell**        | zsh with Oh My Zsh                                             |
@@ -210,7 +210,7 @@ docker volume prune              # Remove unused volumes
 The file `.devcontainer/allowed-domains.conf` defines which external domains the container can reach. The following are **enabled by default** (minimum required):
 
 - **GitHub** — Copilot, Git, API
-- **npm** and **PyPI** — package installation
+- **npm**, **Node.js** and **PyPI** — package installation
 - **Ubuntu Repos** — apt
 - **VS Code / Microsoft** — extensions, updates
 
@@ -340,8 +340,7 @@ If the container feels slow (especially `npm install`, `pip install`, or file-he
        └── If Squid fails → container startup ABORTS (fail-closed)
 3. VS Code connects as user "vscode" (remoteUser)
 4. post-create.sh runs once:
-   ├── Git credential hardening (cache instead of host forwarding)
-   └── Install Python/Node dependencies (if present)
+   └── Git credential hardening (cache instead of host forwarding)
 ```
 
 ### What Is Isolated?
@@ -420,7 +419,6 @@ These are not implemented but could further harden the container for high-securi
 
 - **Audit Logging:** Install `auditd` or configure persistent shell history (`HISTFILE` + `PROMPT_COMMAND`) to enable forensic analysis of AI agent actions. Persist Squid `access.log` via a volume mount.
 - **Custom Seccomp Profile:** Block unnecessary syscalls (`ptrace`, `mount`, `keyctl`) via `--security-opt seccomp=custom-profile.json`.
-- **Container Image Pinning:** Pin the base image by SHA256 digest instead of tag to prevent supply chain attacks via compromised registry mirrors.
 - **Content-Inspection Proxy:** Deploy mitmproxy or a similar tool for deep packet inspection on whitelisted domains (detects data exfiltration in request bodies).
 
 ---

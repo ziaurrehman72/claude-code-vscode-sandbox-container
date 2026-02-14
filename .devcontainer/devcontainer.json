@@ -9,6 +9,17 @@
   },
 
   // -------------------------------------------------------------------------
+  // features: Dev Container Features for language runtimes.
+  // Node.js is installed via the official feature (nvm-based, GPG-verified).
+  // Default version is 20; devs can switch with `nvm install <version>`.
+  // -------------------------------------------------------------------------
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
+  },
+
+  // -------------------------------------------------------------------------
   // runArgs: Container runtime security and resource configuration.
   //
   // Security: no-new-privileges, cap-drop=ALL (re-add only required caps),

@@ -1,4 +1,5 @@
-# Dockerfile – Sandboxed Dev Container (Ubuntu 24.04 + Python + Node.js)
+# Dockerfile – Sandboxed Dev Container (Ubuntu 24.04 + Python)
+# Node.js is installed via Dev Container Feature (see devcontainer.json).
 
 # --- Base Image (Ubuntu 24.04 LTS, non-root "vscode" user) ---
 # NOTE: Digest should be updated regularly (e.g. monthly) to pick up security patches.
@@ -7,7 +8,6 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04@sha256:d94c97dd9cacf183d0
 
 # --- Build Arguments ---
 ARG PYTHON_VERSION=3.12
-ARG NODE_VERSION=20
 
 
 # --- System Packages ---
@@ -34,24 +34,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 
-# --- Node.js (via NodeSource) ---
-RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-
 # --- pipx (PEP 668 compliant tool installer, tools installed in user step) ---
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pipx \
     && rm -rf /var/lib/apt/lists/*
-
-
-# --- Node.js Dev Tools (global) ---
-RUN npm install -g \
-    typescript \
-    ts-node \
-    eslint \
-    prettier
 
 
 # --- SECURITY: Squid proxy + iptables for domain-based egress filtering ---
