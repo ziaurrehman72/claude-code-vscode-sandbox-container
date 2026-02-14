@@ -234,7 +234,7 @@ Add this to `runArgs` in `devcontainer.json`:
 ├── Dockerfile               # Image definition (Ubuntu 24.04 + tools)
 ├── post-create.sh           # One-time setup after container creation
 ├── entrypoint.sh            # Container entrypoint (runs firewall as root)
-├── egress-firewall.sh       # iptables-based network whitelist
+├── egress-firewall.sh       # Squid proxy + iptables enforcement
 └── allowed-domains.conf     # List of allowed egress domains
 
 .copilotignore               # Files excluded from Copilot analysis
@@ -370,9 +370,9 @@ DNS traffic (UDP/TCP port 53) is allowed without restriction to ensure name reso
 
 #### 4. NET_RAW Capability
 
-The `NET_RAW` capability is required for DNS resolution and general network connectivity. However, it also enables raw socket creation, which could be used for ICMP tunneling or network scanning.
+The `NET_RAW` capability is required for DNS resolution and general network connectivity. However, it also enables raw socket creation, which could theoretically be used for network scanning.
 
-**Mitigation:** Add `iptables -A OUTPUT -p icmp -j DROP` to `egress-firewall.sh` if ICMP is not needed. Consider a custom seccomp profile to block `socket(AF_PACKET, ...)` calls.
+**Mitigation:** ICMP is already blocked via `iptables -A OUTPUT -p icmp -j DROP`. Consider a custom seccomp profile to block `socket(AF_PACKET, ...)` calls for additional hardening.
 
 #### 5. Wildcard Domains in allowed-domains.conf
 

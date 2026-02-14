@@ -3,41 +3,15 @@
 # egress-firewall.sh – Domain-based egress filtering via Squid forward proxy
 # =============================================================================
 #
-# This script runs as root at container start and configures:
-#   1. A Squid forward proxy that filters by DOMAIN NAME (not IP)
-#   2. iptables LOG rules to monitor direct connections (bypass detection)
+# Runs as root at container start. Configures:
+#   1. Squid forward proxy filtering HTTP/HTTPS by domain name
+#   2. iptables DROP rules (only proxy user can reach internet directly)
 #
-# WHY a Proxy Instead of IP-Based Filtering?
-#   The previous approach resolved domains to IPs at container start and
-#   used iptables/ipset to allow only those IPs. This is fundamentally
-#   broken for CDN-backed services (GitHub Copilot, npm, Azure, etc.)
-#   where IPs rotate frequently. Even periodic DNS re-resolution cannot
-#   keep up with CDN IP changes.
+# Squid sees domains via Host header (HTTP) / CONNECT method (HTTPS),
+# so CDN IP rotation is irrelevant. No TLS interception needed.
 #
-#   A forward proxy solves this because:
-#   - HTTP:  The proxy sees the Host header → filters by domain name
-#   - HTTPS: The client sends CONNECT domain:443 → proxy sees the domain
-#            BEFORE establishing the TLS tunnel (no TLS interception needed)
-#   - CDN IP rotation is completely irrelevant
-#
-# ALLOWED DESTINATIONS:
-#   Defined in /usr/local/etc/allowed-domains.conf
-#   (source file: .devcontainer/allowed-domains.conf)
-#
-# HOW IT WORKS:
-#   1. Squid listens on localhost:3128
-#   2. allowed-domains.conf is converted to a Squid ACL file
-#   3. HTTP_PROXY/HTTPS_PROXY env vars route traffic through Squid
-#   4. VS Code http.proxy setting routes extension traffic through Squid
-#   5. Squid denies requests to non-whitelisted domains
-#   6. iptables LOG rules detect any direct connections (bypass monitoring)
-#
-# SECURITY MODEL:
-#   - Proxy env vars + VS Code settings ensure standard tools use Squid
-#   - Squid denies connections to non-whitelisted domains
-#   - iptables logging detects proxy bypass attempts
-#   - no-new-privileges prevents privilege escalation
-#   - The proxy runs as a dedicated "proxy" user with no login shell
+# Domain whitelist: /usr/local/etc/allowed-domains.conf
+# Bypass monitoring: dmesg | grep EGRESS_BLOCKED
 #
 # =============================================================================
 
@@ -59,14 +33,7 @@ if [ ! -f "$DOMAINS_FILE" ]; then
 fi
 
 # ── Generate Squid ACL from allowed-domains.conf ─────────────────────────────
-# Convert our domain list into Squid's dstdomain ACL format.
-# Squid ACL format:
-#   .example.com  → matches example.com AND all subdomains (*.example.com)
-#   example.com   → matches only example.com exactly
-#
-# Our conversion rules:
-#   *.example.com → .example.com  (Squid wildcard = leading dot)
-#   example.com   → example.com   (exact match only, no automatic wildcard)
+# *.example.com → .example.com (Squid wildcard), plain → exact match only
 # ─────────────────────────────────────────────────────────────────────────────
 echo "   📄 Generating Squid ACL from $DOMAINS_FILE..."
 
@@ -229,51 +196,42 @@ else
 fi
 
 # ── Configure iptables (enforced egress blocking) ────────────────────────────
-# Block direct outbound HTTP/HTTPS connections that bypass the Squid proxy.
-# Only the "proxy" user (Squid) is allowed to make direct connections.
-# All other users (including vscode) MUST go through the proxy.
-#
-# This enforces the domain whitelist at the network level — even if a
-# process unsets HTTP_PROXY or uses a library that ignores proxy settings,
-# the connection will be dropped by iptables.
-#
-# IMPORTANT: This requires Docker (dockerd) as the container runtime.
+# Only the proxy user (Squid) can make direct outbound connections.
+# All other users are blocked — even if HTTP_PROXY is unset.
+# Requires dockerd as the container runtime.
 # ─────────────────────────────────────────────────────────────────────────────
 echo "   🔧 Configuring iptables (enforced DROP mode)..."
 
-# Get the UID of the proxy user (Squid runs as this user)
 PROXY_UID=$(id -u proxy 2>/dev/null || echo "13")
 
-# Flush existing OUTPUT rules to start clean
 iptables -F OUTPUT 2>/dev/null || true
 
-# Allow DNS (UDP + TCP port 53) — required by both proxy and clients
+# Allow DNS
 iptables -A OUTPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || true
 iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
 
-# Allow all loopback traffic (proxy <-> clients on localhost)
+# Allow loopback (proxy <-> clients)
 iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
 
-# Allow established/related connections (response packets)
+# Allow established connections
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
 
-# Allow container-internal traffic (Docker bridge network)
+# Allow container-internal traffic
 iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT 2>/dev/null || true
 iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT 2>/dev/null || true
 
-# ALLOW the proxy user (Squid) to make direct outbound connections.
-# This is the ONLY user that can reach the internet directly.
+# Allow proxy user (Squid) to make direct outbound connections
 iptables -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$PROXY_UID" -j ACCEPT 2>/dev/null || true
 iptables -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$PROXY_UID" -j ACCEPT 2>/dev/null || true
 
-# LOG and DROP direct HTTP/HTTPS from all other users (bypass attempts).
-# Check logs with: dmesg | grep EGRESS_BLOCKED
+# LOG + DROP direct HTTP/HTTPS from non-proxy users (bypass detection)
+# Check: dmesg | grep EGRESS_BLOCKED
 iptables -A OUTPUT -p tcp --dport 80 -j LOG --log-prefix "EGRESS_BLOCKED_HTTP: " --log-level 4 2>/dev/null || true
 iptables -A OUTPUT -p tcp --dport 80 -j DROP 2>/dev/null || true
 iptables -A OUTPUT -p tcp --dport 443 -j LOG --log-prefix "EGRESS_BLOCKED_HTTPS: " --log-level 4 2>/dev/null || true
 iptables -A OUTPUT -p tcp --dport 443 -j DROP 2>/dev/null || true
 
-# Block ICMP (prevents ICMP tunneling for data exfiltration)
+# Block ICMP (prevents tunneling for data exfiltration)
 iptables -A OUTPUT -p icmp -j DROP 2>/dev/null || true
 
 echo "   ✅ iptables DROP rules active (only proxy user can reach internet directly)"
