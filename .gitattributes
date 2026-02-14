@@ -1,0 +1,25 @@
+# =============================================================================
+# .gitattributes – Enforce consistent line endings across platforms
+# =============================================================================
+# Git on Windows converts LF → CRLF on checkout by default (core.autocrlf).
+# Shell scripts with CRLF line endings break inside the Linux container:
+#   /usr/bin/env: 'bash\r': No such file or directory
+#
+# These rules ensure critical files always use LF, regardless of the
+# developer's OS or Git config.
+# =============================================================================
+
+# ── Shell Scripts (must be LF for Linux execution) ────────────────────────────
+*.sh text eol=lf
+
+# ── Configuration Files (parsed inside the container) ─────────────────────────
+*.conf text eol=lf
+
+# ── Container Config ──────────────────────────────────────────────────────────
+Dockerfile text eol=lf
+devcontainer.json text eol=lf
+
+# ── Ignore Files ──────────────────────────────────────────────────────────────
+.gitignore text eol=lf
+.copilotignore text eol=lf
+.gitattributes text eol=lf

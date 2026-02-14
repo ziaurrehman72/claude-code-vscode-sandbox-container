@@ -68,10 +68,20 @@ This dev container is hardened and specifically addresses risks introduced by AI
 2. **Container Runtime** — one of the following:
    - [Rancher Desktop](https://rancherdesktop.io/) with dockerd backend — **recommended** (free, no license costs)
    - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (license required for organizations >250 employees)
+3. **Windows only:** [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) is **required**. The container uses Linux features (iptables, Squid, Linux capabilities) that only work with the WSL2 backend. Hyper-V Legacy is **not** supported.
+
+   ```powershell
+   # Install WSL2 (PowerShell as Administrator)
+   wsl --install
+   ```
+
+   Both Rancher Desktop and Docker Desktop must be configured to use the **WSL2 backend** (this is the default for new installations).
 
 ### Setup in 3 Steps
 
 #### 1. Copy `.devcontainer/` into your project
+
+**macOS / Linux:**
 
 ```bash
 # Clone this repository (one-time)
@@ -83,9 +93,27 @@ cp -r github-copilot-vscode-sandbox-container/.devcontainer/ /path/to/your/proje
 # Optional: copy security files as well
 cp github-copilot-vscode-sandbox-container/.copilotignore /path/to/your/project/
 cp github-copilot-vscode-sandbox-container/.gitignore /path/to/your/project/
+cp github-copilot-vscode-sandbox-container/.gitattributes /path/to/your/project/
 ```
 
-> **Tip:** If your project already has a `.gitignore`, merge the entries from the provided file instead of overwriting it.
+**Windows (PowerShell):**
+
+```powershell
+# Clone this repository (one-time)
+git clone https://github.com/MSWagner/github-copilot-vscode-sandbox-container.git
+
+# Copy the .devcontainer folder into your project
+Copy-Item -Recurse github-copilot-vscode-sandbox-container\.devcontainer\ \path\to\your\project\
+
+# Optional: copy security files as well
+Copy-Item github-copilot-vscode-sandbox-container\.copilotignore \path\to\your\project\
+Copy-Item github-copilot-vscode-sandbox-container\.gitignore \path\to\your\project\
+Copy-Item github-copilot-vscode-sandbox-container\.gitattributes \path\to\your\project\
+```
+
+> **Tip:** If your project already has a `.gitignore` or `.gitattributes`, merge the entries from the provided files instead of overwriting them.
+>
+> **Windows Tip:** For best performance, store your project inside the WSL2 filesystem (`\\wsl$\Ubuntu\home\...`) rather than on `C:\`. File access from the Windows filesystem into the container is significantly slower.
 
 #### 2. Start the container
 
@@ -114,6 +142,13 @@ brew install --cask rancher
 # Linux — see https://docs.rancherdesktop.io/getting-started/installation/#linux
 ```
 
+```powershell
+# Windows (winget)
+winget install suse.RancherDesktop
+
+# Alternative: download the installer from https://rancherdesktop.io/
+```
+
 ### Configure Rancher Desktop
 
 1. Open Rancher Desktop
@@ -126,7 +161,7 @@ docker info
 
 ### Configure VS Code
 
-Add this setting to your VS Code User Settings (JSON) via `Cmd+Shift+P` → "Preferences: Open User Settings (JSON)":
+Add this setting to your VS Code User Settings (JSON) via `Cmd+Shift+P` (macOS) / `Ctrl+Shift+P` (Windows/Linux) → "Preferences: Open User Settings (JSON)":
 
 ```json
 {
@@ -177,7 +212,7 @@ In `.devcontainer/devcontainer.json` under `runArgs`:
 
 ### Port Forwarding
 
-Ports `3000`, `5000`, `8000`, `8080` are forwarded by default. Adjust in `devcontainer.json` under `forwardPorts`. Additional ports can be forwarded manually in VS Code (`Cmd+Shift+P` → "Forward a Port").
+Ports `3000`, `5000`, `8000`, `8080` are forwarded by default. Adjust in `devcontainer.json` under `forwardPorts`. Additional ports can be forwarded manually in VS Code (`Cmd+Shift+P` (macOS) / `Ctrl+Shift+P` (Windows/Linux) → "Forward a Port").
 
 ### Disabling Network Access (Offline Mode)
 
@@ -204,6 +239,7 @@ Add this to `runArgs` in `devcontainer.json`:
 
 .copilotignore               # Files excluded from Copilot analysis
 .gitignore                   # Files excluded from version control
+.gitattributes               # Enforces LF line endings (critical for Windows)
 ```
 
 ---
@@ -216,7 +252,8 @@ Add this to `runArgs` in `devcontainer.json`:
 # Clear image cache and rebuild
 docker system prune -a
 
-# In VS Code: Cmd+Shift+P → "Dev Containers: Rebuild Container"
+# In VS Code: Cmd+Shift+P (macOS) / Ctrl+Shift+P (Windows/Linux)
+# → "Dev Containers: Rebuild Container"
 ```
 
 ### Network Issues (Domain Blocked)
@@ -238,8 +275,33 @@ docker exec -u root <container-id> chown -R vscode:vscode /workspaces
 code --list-extensions | grep copilot
 
 # If not listed, rebuild the container:
-# Cmd+Shift+P → "Dev Containers: Rebuild Container"
+# Cmd+Shift+P (macOS) / Ctrl+Shift+P (Windows/Linux)
+# → "Dev Containers: Rebuild Container"
 ```
+
+### Windows: `/bin/bash\r: No such file or directory`
+
+This means shell scripts have Windows-style line endings (CRLF instead of LF). The `.gitattributes` file in this repository prevents this, but if you copied files manually:
+
+```powershell
+# Fix line endings in existing files (Git Bash or WSL)
+sed -i 's/\r$//' .devcontainer/*.sh
+sed -i 's/\r$//' .devcontainer/allowed-domains.conf
+
+# Or re-clone with correct settings
+git config --global core.autocrlf input
+git clone https://github.com/MSWagner/github-copilot-vscode-sandbox-container.git
+```
+
+> **Root cause:** Git on Windows defaults to `core.autocrlf=true`, which converts LF → CRLF on checkout. The `.gitattributes` file overrides this for container-critical files.
+
+### Windows: Slow File Access / Container Performance
+
+If the container feels slow (especially `npm install`, `pip install`, or file-heavy operations):
+
+- Move your project into the **WSL2 filesystem** (`\\wsl$\Ubuntu\home\...`) instead of keeping it on `C:\`
+- Windows filesystem mounts (from `C:\`) into WSL2/Docker have significant I/O overhead
+- In VS Code: `Ctrl+Shift+P` → "WSL: New Window" → open your project from within WSL
 
 ---
 
