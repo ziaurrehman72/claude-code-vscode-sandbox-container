@@ -18,15 +18,17 @@ echo ""
 # 0. SECURITY: Git Credential Isolation
 # =============================================================================
 # Override VS Code's default credential forwarding with a short-lived
-# in-memory cache (5 min). Credentials are NOT forwarded from the host.
+# in-memory cache (60 sec). Credentials are NOT forwarded from the host.
+# The short timeout minimizes the window in which an AI agent could reuse
+# cached credentials for unauthorized operations (e.g., git push, API calls).
 # =============================================================================
 echo "🔒 Git Credential Hardening..."
 
-git config --global credential.helper 'cache --timeout=300'
+git config --global credential.helper 'cache --timeout=60'
 git config --global push.default simple
 git config --global remote.pushDefault origin
 
-echo "✅ Git credential helper set to 'cache' (5min timeout)"
+echo "✅ Git credential helper set to 'cache' (60s timeout)"
 echo ""
 
 

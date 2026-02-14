@@ -32,7 +32,7 @@
     "--cpus=4",
     "--pids-limit=512",
     "--read-only",
-    "--tmpfs=/tmp:rw,exec,nosuid,size=2g",
+    "--tmpfs=/tmp:rw,noexec,nosuid,size=2g",
     "--tmpfs=/run:rw,nosuid,size=64m",
     "--tmpfs=/etc/squid:rw,nosuid,size=16m",
     "--tmpfs=/var/log/squid:rw,nosuid,size=128m",
@@ -63,7 +63,8 @@
     "NO_PROXY": "localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8",
     "no_proxy": "localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8",
     "SSH_AUTH_SOCK": "",
-    "GIT_TERMINAL_PROMPT": "0"
+    "GIT_TERMINAL_PROMPT": "0",
+    "TMPDIR": "/home/vscode/.tmp"
   },
 
   "customizations": {

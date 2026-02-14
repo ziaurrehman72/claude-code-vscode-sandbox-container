@@ -1,7 +1,7 @@
 # Sandboxed Dev Container for AI-Assisted Development
 
 > A hardened, isolated development environment for VS Code with GitHub Copilot.
-> Protects the host and credentials from potentially risky AI agent actions.
+> Restricts network egress, blocks privilege escalation, limits credential exposure, and prevents arbitrary binary execution — reducing the attack surface of AI agents like Copilot Agent Mode.
 
 ---
 
@@ -44,19 +44,19 @@ This repository is a **template**. It contains a fully configured `.devcontainer
 
 This dev container is hardened and specifically addresses risks introduced by AI agents (Copilot Agent Mode, MCP tools, etc.):
 
-| Measure                      | Details                                                                                 |
-| ---------------------------- | --------------------------------------------------------------------------------------- |
-| **Rootless Container**       | Runs without host root privileges                                                       |
-| **Capability Drop**          | All Linux capabilities removed, only `NET_RAW`, `DAC_OVERRIDE`, `NET_ADMIN` allowed     |
-| **No New Privileges**        | Processes cannot gain additional privileges                                             |
-| **Egress Firewall**          | Outbound network traffic restricted to a domain whitelist (Squid proxy + iptables DROP) |
-| **SSH Agent Blocked**        | Host SSH keys are not available inside the container                                    |
-| **Git Credential Isolation** | Credential helper limited to a short-lived cache (5 min)                                |
-| **Resource Limits**          | Memory (8 GB), CPUs (4), PIDs (512) — prevents DoS of the host                          |
-| **Sudoers Removed**          | No `sudo` available inside the container                                                |
-| **`.copilotignore`**         | Sensitive files are excluded from Copilot context                                       |
-| **Port Isolation**           | Only explicitly defined ports are forwarded                                             |
-| **Read-Only Filesystem**     | Container root filesystem is read-only; only tmpfs and /workspaces writable             |
+| Measure                      | Details                                                                                                 |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Rootless Container**       | Runs without host root privileges                                                                       |
+| **Capability Drop**          | All Linux capabilities removed, only `NET_RAW`, `DAC_OVERRIDE`, `NET_ADMIN` allowed; SUID bits stripped |
+| **No New Privileges**        | Processes cannot gain additional privileges                                                             |
+| **Egress Firewall**          | Outbound network traffic restricted to a domain whitelist (Squid proxy + iptables DEFAULT-DROP)         |
+| **SSH Agent Blocked**        | Host SSH keys are not available inside the container                                                    |
+| **Git Credential Isolation** | Credential helper limited to a short-lived cache (60 sec)                                               |
+| **Resource Limits**          | Memory (8 GB), CPUs (4), PIDs (512) — prevents DoS of the host                                          |
+| **Sudoers Removed**          | No `sudo` available inside the container                                                                |
+| **`.copilotignore`**         | Sensitive files are excluded from Copilot context                                                       |
+| **Port Isolation**           | Only explicitly defined ports are forwarded                                                             |
+| **Read-Only Filesystem**     | Container root filesystem is read-only; only tmpfs and /workspaces writable                             |
 
 ---
 
@@ -337,17 +337,9 @@ If the container feels slow (especially `npm install`, `pip install`, or file-he
 
 ### Known Limitations
 
-This sandbox significantly reduces the attack surface for AI agents, but **no sandbox is 100% secure**. Security is always a cost/benefit trade-off. The following limitations are accepted risks:
+This sandbox significantly reduces the attack surface for AI agents, but **no sandbox is 100% secure**. Security is always a cost/benefit trade-off. The following limitations are known, accepted risks that are **not yet mitigated**:
 
-#### 1. Egress Firewall Enforcement
-
-The egress firewall uses iptables DROP rules with `--uid-owner` exceptions to **enforce** that all HTTP/HTTPS traffic goes through the Squid proxy. This means `unset HTTP_PROXY` or direct socket connections are **blocked at the kernel level** — only the Squid proxy user can make direct outbound connections.
-
-A transparent proxy via iptables REDIRECT is not feasible because it would only work for HTTP (port 80). For HTTPS (port 443), the proxy cannot inspect encrypted traffic without TLS interception (MITM), which breaks certificate pinning and would cause Copilot/GitHub connections to fail.
-
-> **Monitoring tip:** Check for blocked bypass attempts with `dmesg | grep EGRESS_BLOCKED`.
-
-#### 2. Data Exfiltration via Whitelisted Domains
+#### 1. Data Exfiltration via Whitelisted Domains
 
 Even with perfect egress filtering, whitelisted domains can be used as exfiltration channels:
 
@@ -362,38 +354,40 @@ This is an inherent trade-off: blocking these domains would break core functiona
 
 **Mitigation:** Review and narrow the domain whitelist in `allowed-domains.conf` for your use case. Remove domains for services you don't use (Figma, Miro, Notion, Amplitude). Replace broad Azure wildcards (`*.blob.core.windows.net`) with your specific account URLs where possible.
 
-#### 3. DNS Tunneling
+#### 2. DNS Tunneling
 
-DNS traffic (UDP/TCP port 53) is allowed without restriction to ensure name resolution works. This means data could theoretically be exfiltrated by encoding it in DNS queries to an attacker-controlled domain.
+Direct DNS queries to external DNS servers are **blocked and logged** — only the container's internal resolver (auto-detected from `/etc/resolv.conf`, typically `127.0.0.11`) is allowed. However, DNS tunneling through the container resolver is still possible: an agent can encode data in query names (e.g., `secret-data.attacker.com`), which the container resolver forwards through Docker's DNS to upstream resolvers and ultimately to the attacker's authoritative DNS server.
 
-**Mitigation:** Restrict DNS to the container's DNS resolver (`127.0.0.11` for Docker) via additional iptables rules. This is not done by default because the required resolver address varies between container runtimes.
+**Mitigation:** Deploy a DNS-layer filtering solution (e.g., Pi-hole, CoreDNS with response policy zones) or monitor DNS query logs for high-entropy domain names.
 
-#### 4. NET_RAW Capability
+> **Monitoring tip:** Check for blocked direct DNS attempts with `dmesg | grep EGRESS_BLOCKED_DNS`.
 
-The `NET_RAW` capability is required for DNS resolution and general network connectivity. However, it also enables raw socket creation, which could theoretically be used for network scanning.
+#### 3. NET_RAW Capability
 
-**Mitigation:** ICMP is already blocked via `iptables -A OUTPUT -p icmp -j DROP`. Consider a custom seccomp profile to block `socket(AF_PACKET, ...)` calls for additional hardening.
+The `NET_RAW` capability is required for DNS resolution and general network connectivity. ICMP is blocked by the iptables DEFAULT-DROP policy (logged via `EGRESS_BLOCKED_ICMP`), but `NET_RAW` still allows raw socket creation (`AF_PACKET`), which could be used for network scanning within the container network.
 
-#### 5. Wildcard Domains in allowed-domains.conf
+**Mitigation:** Add a custom seccomp profile to block `socket(AF_PACKET, ...)` calls.
+
+#### 4. Wildcard Domains in allowed-domains.conf
 
 Some entries in `allowed-domains.conf` use wildcards (e.g., `*.blob.core.windows.net`, `*.visualstudio.com`). These grant access to **all** subdomains, including potentially attacker-controlled ones.
 
 **Important:** Domains in `allowed-domains.conf` without a `*` prefix match **only the exact domain** — subdomains are not automatically included. If you need subdomains, use the explicit `*.example.com` syntax. Review the domain list and narrow wildcards to specific instances where possible.
 
-#### 6. No MCP Server Restrictions
+#### 5. No MCP Server Restrictions
 
 The dev container does not restrict which [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) servers can be used by Copilot Agent Mode. Any MCP server that connects to a whitelisted domain will work. Organizations should define MCP server policies via GitHub Enterprise Copilot settings or VS Code organizational policies.
 
-#### 7. Git Credentials
+#### 6. Git Credentials
 
-Git credentials are cached for 5 minutes after explicit authentication by the user. During this window, any process (including AI agents) can perform Git operations. The host's credential helper is **not** forwarded — only the short-lived in-memory cache is available.
+Git credentials are cached for 60 seconds after explicit authentication by the user. During this window, any process (including AI agents) can perform Git operations. The host's credential helper is **not** forwarded — only the short-lived in-memory cache is available.
 
 **Hardening options:**
 
-- Reduce timeout further: Change `--timeout=300` to a lower value in `post-create.sh`
-- Disable entirely: Set `git config --global credential.helper ''` — but this means `git push` / `git pull` to private repos will not work at all
+- Reduce timeout further: Change `--timeout=60` to a lower value in `post-create.sh`
+- Disable entirely: Set `git config --global credential.helper ''` — but this means `git push` / `git pull` to private repos will not work at all (since `GIT_TERMINAL_PROMPT=0` prevents interactive prompts)
 
-#### 8. Package Installation (Supply Chain)
+#### 7. Package Installation (Supply Chain)
 
 PyPI and npm registries are whitelisted, allowing AI agents to install arbitrary packages. Malicious or typosquatted packages can execute arbitrary code via post-install scripts.
 

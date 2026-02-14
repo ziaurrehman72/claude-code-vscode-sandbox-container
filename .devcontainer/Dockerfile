@@ -64,6 +64,13 @@ RUN apt-get update \
 # --- SECURITY: Remove sudoers (defense-in-depth, use `docker exec -u root` if needed) ---
 RUN rm -f /etc/sudoers.d/vscode
 
+# --- SECURITY: Strip SUID/SGID bits from binaries (defense-in-depth) ---
+# --no-new-privileges already neutralizes SUID, but stripping bits removes
+# the attack surface entirely. Only keep mount/umount (needed by some tools).
+RUN find / -path /proc -prune -o -path /sys -prune -o -type f -perm /6000 -print 2>/dev/null \
+    | grep -v -E '/(mount|umount)$' \
+    | xargs -r chmod u-s,g-s 2>/dev/null || true
+
 
 # --- SECURITY: Egress firewall script (runs at container start via entrypoint) ---
 COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf

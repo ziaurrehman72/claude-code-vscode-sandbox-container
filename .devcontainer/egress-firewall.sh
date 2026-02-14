@@ -200,48 +200,68 @@ fi
 # All other users are blocked — even if HTTP_PROXY is unset.
 # Requires dockerd as the container runtime.
 # ─────────────────────────────────────────────────────────────────────────────
-echo "   🔧 Configuring iptables (enforced DROP mode)..."
+echo "   🔧 Configuring iptables (DEFAULT-DROP mode)..."
 
 PROXY_UID=$(id -u proxy 2>/dev/null || echo "13")
 
+# ── Determine container DNS resolver ─────────────────────────────────────────
+# Docker uses 127.0.0.11, but fall back to parsing resolv.conf if different.
+CONTAINER_DNS=$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf 2>/dev/null || echo "127.0.0.11")
+echo "   📍 Container DNS resolver: ${CONTAINER_DNS}"
+
 iptables -F OUTPUT 2>/dev/null || true
 
-# Allow DNS
-iptables -A OUTPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || true
-iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+# ── DEFAULT-DROP POLICY (K-1 fix) ────────────────────────────────────────────
+# Set policy to DROP — all traffic is blocked unless explicitly allowed.
+# This closes exfiltration via non-standard ports (8443, 4443, 9090, etc.)
+# and prevents reverse shells on arbitrary ports.
+iptables -P OUTPUT DROP 2>/dev/null || true
 
-# Allow loopback (proxy <-> clients)
+# ── Allow loopback (proxy <-> clients, internal services) ────────────────────
 iptables -A OUTPUT -o lo -j ACCEPT 2>/dev/null || true
 
-# Allow established connections
+# ── Allow DNS only to container resolver (K-2 fix) ──────────────────────────
+# Restrict DNS to the container's own resolver to prevent DNS tunneling.
+# Data exfiltration via DNS queries to attacker-controlled servers is blocked.
+iptables -A OUTPUT -p udp --dport 53 -d "$CONTAINER_DNS" -j ACCEPT 2>/dev/null || true
+iptables -A OUTPUT -p tcp --dport 53 -d "$CONTAINER_DNS" -j ACCEPT 2>/dev/null || true
+# LOG + DROP DNS to any other destination (DNS tunneling detection)
+iptables -A OUTPUT -p udp --dport 53 -j LOG --log-prefix "EGRESS_BLOCKED_DNS: " --log-level 4 2>/dev/null || true
+iptables -A OUTPUT -p udp --dport 53 -j DROP 2>/dev/null || true
+iptables -A OUTPUT -p tcp --dport 53 -j LOG --log-prefix "EGRESS_BLOCKED_DNS: " --log-level 4 2>/dev/null || true
+iptables -A OUTPUT -p tcp --dport 53 -j DROP 2>/dev/null || true
+
+# ── Allow established connections ────────────────────────────────────────────
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
 
-# Allow container-internal traffic
+# ── Allow container-internal traffic ─────────────────────────────────────────
 iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT 2>/dev/null || true
 iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT 2>/dev/null || true
 
-# Allow proxy user (Squid) to make direct outbound connections
+# ── Allow proxy user (Squid) to make direct outbound connections ─────────────
 iptables -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$PROXY_UID" -j ACCEPT 2>/dev/null || true
 iptables -A OUTPUT -p tcp --dport 443 -m owner --uid-owner "$PROXY_UID" -j ACCEPT 2>/dev/null || true
 
-# LOG + DROP direct HTTP/HTTPS from non-proxy users (bypass detection)
-# Check: dmesg | grep EGRESS_BLOCKED
-iptables -A OUTPUT -p tcp --dport 80 -j LOG --log-prefix "EGRESS_BLOCKED_HTTP: " --log-level 4 2>/dev/null || true
-iptables -A OUTPUT -p tcp --dport 80 -j DROP 2>/dev/null || true
-iptables -A OUTPUT -p tcp --dport 443 -j LOG --log-prefix "EGRESS_BLOCKED_HTTPS: " --log-level 4 2>/dev/null || true
-iptables -A OUTPUT -p tcp --dport 443 -j DROP 2>/dev/null || true
+# ── LOG all other blocked traffic (bypass/exfiltration detection) ────────────
+# With DEFAULT-DROP, all non-whitelisted traffic is blocked. LOG before DROP
+# for visibility. Check: dmesg | grep EGRESS_BLOCKED
+iptables -A OUTPUT -p tcp -j LOG --log-prefix "EGRESS_BLOCKED_TCP: " --log-level 4 2>/dev/null || true
+iptables -A OUTPUT -p udp -j LOG --log-prefix "EGRESS_BLOCKED_UDP: " --log-level 4 2>/dev/null || true
+iptables -A OUTPUT -p icmp -j LOG --log-prefix "EGRESS_BLOCKED_ICMP: " --log-level 4 2>/dev/null || true
 
-# Block ICMP (prevents tunneling for data exfiltration)
-iptables -A OUTPUT -p icmp -j DROP 2>/dev/null || true
+# Note: DEFAULT-DROP policy handles the actual blocking — no explicit DROP
+# rules needed. The LOG rules above are for monitoring only.
 
-echo "   ✅ iptables DROP rules active (only proxy user can reach internet directly)"
+echo "   ✅ iptables DEFAULT-DROP active (only proxy user can reach internet directly)"
+echo "   ✅ DNS restricted to container resolver: ${CONTAINER_DNS}"
 echo ""
 echo "   ═══════════════════════════════════════════════════════════════"
 echo "   🛡️  EGRESS FIREWALL ACTIVE (Domain-based proxy filtering)"
 echo "   ───────────────────────────────────────────────────────────────"
 echo "   Proxy:    localhost:${PROXY_PORT}"
 echo "   Domains:  ${DOMAIN_COUNT} allowed (see $DOMAINS_FILE)"
-echo "   Mode:     Squid proxy + iptables DROP (enforced)"
+echo "   Mode:     Squid proxy + iptables DEFAULT-DROP (enforced)"
+echo "   DNS:      Restricted to ${CONTAINER_DNS} (tunneling blocked)"
 echo "   Blocked:  dmesg | grep EGRESS_BLOCKED"
 echo "   ═══════════════════════════════════════════════════════════════"
 echo ""

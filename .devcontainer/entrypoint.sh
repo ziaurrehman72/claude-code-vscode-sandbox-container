@@ -15,6 +15,14 @@ set -euo pipefail
 # Server, shell config, pipx, etc.
 chown vscode:vscode /home/vscode
 
+# ── Create TMPDIR for vscode user ────────────────────────────────────────────
+# /tmp is mounted noexec to prevent AI agents from downloading and executing
+# arbitrary binaries. Build tools (pip, node-gyp) that need exec use TMPDIR
+# which points to /home/vscode/.tmp (on the /home/vscode tmpfs with exec).
+mkdir -p /home/vscode/.tmp
+chmod 1700 /home/vscode/.tmp
+chown vscode:vscode /home/vscode/.tmp
+
 # ── Create VS Code marker files ──────────────────────────────────────────────
 # With --read-only, VS Code cannot patch /etc/environment or /etc/profile.
 # These marker files tell VS Code the patching is already done (the correct
