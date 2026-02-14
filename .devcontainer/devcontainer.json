@@ -47,22 +47,49 @@
   // --cap-add=DAC_OVERRIDE
   //   → Allows root to bypass file permission checks. Required by
   //     VS Code because the VS Code Server installation runs via
-  //     "podman exec -u root" and needs access to the /vscode volume,
-  //     which belongs to a different user (UID 1000) in the rootless
-  //     Podman user namespace. Without DAC_OVERRIDE,
-  //     "mkdir /vscode/vscode-server" fails with "Permission denied".
-  //     This capability is also included in Docker's default profile.
+  //     "docker exec -u root" and needs access to the /vscode volume.
+  //     Without DAC_OVERRIDE, "mkdir /vscode/vscode-server" fails
+  //     with "Permission denied". This capability is included in
+  //     Docker's default profile.
   //
   // --cap-add=NET_ADMIN
   //   → SECURITY: Required by the entrypoint to set iptables rules
-  //     for the egress firewall. Only the entrypoint (running as root)
-  //     uses this capability. Since no-new-privileges is set, child
-  //     processes (as vscode user) cannot acquire this capability.
+  //     that enforce proxy usage (block direct port 80/443).
+  //     Only the entrypoint (running as root) uses this capability.
+  //     Since no-new-privileges is set, child processes (as vscode
+  //     user) cannot acquire this capability.
+  //
+  // --cap-add=SETUID / --cap-add=SETGID
+  //   → Required by Squid to drop privileges from root to the
+  //     dedicated "proxy" user after startup. Squid refuses to run
+  //     as root, so it must be able to call setuid()/setgid().
+  //     With no-new-privileges, the vscode user cannot exploit these.
+  //
+  // --cap-add=CHOWN
+  //   → Required at container start to fix ownership of Squid's
+  //     log/cache directories (/var/log/squid, /var/spool/squid).
+  //     Only used by the root entrypoint, not by user processes.
   //
   // --memory=8g / --cpus=4 / --pids-limit=512
   //   → SECURITY: Resource limits prevent denial-of-service of the
   //     host system via fork bombs, crypto mining, or infinite loops.
   //     Adjust based on the host's hardware.
+  //
+  // --read-only
+  //   → SECURITY: Makes the container's root filesystem read-only.
+  //     Prevents AI agents from modifying system binaries, installing
+  //     additional tools via apt, or tampering with security-critical
+  //     files (egress-firewall.sh, squid.conf, allowed-domains.conf).
+  //     Only explicitly defined tmpfs mounts are writable.
+  //
+  // --tmpfs mounts
+  //   → Provide writable scratch space for specific paths that need
+  //     write access: /tmp (general temp), /run (PID files),
+  //     /etc/squid (generated squid.conf + ACL files at runtime),
+  //     /var/log/squid + /var/spool/squid + /var/cache/squid (Squid),
+  //     /home/vscode (user home for shell config, pipx, etc.),
+  //     /var/devcontainer (VS Code marker files).
+  //     The /workspaces mount (project code) is handled by VS Code.
   // -------------------------------------------------------------------------
   "runArgs": [
     "--security-opt=no-new-privileges",
@@ -70,9 +97,21 @@
     "--cap-add=NET_RAW",
     "--cap-add=DAC_OVERRIDE",
     "--cap-add=NET_ADMIN",
+    "--cap-add=SETUID",
+    "--cap-add=SETGID",
+    "--cap-add=CHOWN",
     "--memory=8g",
     "--cpus=4",
-    "--pids-limit=512"
+    "--pids-limit=512",
+    "--read-only",
+    "--tmpfs=/tmp:rw,exec,nosuid,size=2g",
+    "--tmpfs=/run:rw,nosuid,size=64m",
+    "--tmpfs=/etc/squid:rw,nosuid,size=16m",
+    "--tmpfs=/var/log/squid:rw,nosuid,size=128m",
+    "--tmpfs=/var/spool/squid:rw,nosuid,size=256m",
+    "--tmpfs=/var/cache/squid:rw,nosuid,size=256m",
+    "--tmpfs=/home/vscode:rw,exec,nosuid,size=4g",
+    "--tmpfs=/var/devcontainer:rw,nosuid,size=1m"
   ],
 
   // -------------------------------------------------------------------------
@@ -92,7 +131,19 @@
 
   // -------------------------------------------------------------------------
   // remoteEnv: Environment variables set/overridden inside the container.
-  // Here we disable security-relevant credential forwarding:
+  //
+  // HTTP_PROXY / HTTPS_PROXY / http_proxy / https_proxy
+  //   → Tells all HTTP clients (curl, npm, pip, git, VS Code, Copilot)
+  //     to route traffic through the Squid proxy on localhost:3128.
+  //     Both upper and lowercase variants are set because different
+  //     tools check different variable names.
+  //     SECURITY: Combined with iptables rules that block direct
+  //     outbound HTTP/HTTPS, this ensures ALL traffic goes through
+  //     the domain-based proxy filter.
+  //
+  // NO_PROXY / no_proxy
+  //   → Domains/IPs that should bypass the proxy. Localhost and
+  //     container-internal traffic don't need the proxy.
   //
   // SSH_AUTH_SOCK = ""
   //   → Disables SSH agent forwarding from the host into the container.
@@ -106,6 +157,12 @@
   //     asking for a password. Reduces credential leaking risk.
   // -------------------------------------------------------------------------
   "remoteEnv": {
+    "HTTP_PROXY": "http://localhost:3128",
+    "HTTPS_PROXY": "http://localhost:3128",
+    "http_proxy": "http://localhost:3128",
+    "https_proxy": "http://localhost:3128",
+    "NO_PROXY": "localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8",
+    "no_proxy": "localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8",
     "SSH_AUTH_SOCK": "",
     "GIT_TERMINAL_PROMPT": "0"
   },
@@ -163,7 +220,16 @@
 
         // SECURITY: Disable SSH agent forwarding.
         // Prevents host SSH keys from being available inside the container.
-        "remote.SSH.enableAgentForwarding": false
+        "remote.SSH.enableAgentForwarding": false,
+
+        // SECURITY: Route all VS Code HTTP/HTTPS traffic through the
+        // Squid egress proxy. This is the canonical way to configure
+        // proxy usage for VS Code extensions (including Copilot).
+        // Environment variables alone are NOT sufficient — VS Code's
+        // Node.js extension host uses this setting, not HTTP_PROXY.
+        "http.proxy": "http://localhost:3128",
+        "http.proxyStrictSSL": true,
+        "http.proxySupport": "on"
       }
     }
   },
@@ -196,7 +262,7 @@
   // -------------------------------------------------------------------------
   // postCreateCommand: Shell command run ONCE after the container is
   // created (not on every restart!).
-  // Calls our setup script that installs Copilot CLI, among other things.
+  // Calls our setup script that installs dependencies and configures Git.
   // -------------------------------------------------------------------------
   "postCreateCommand": "bash .devcontainer/post-create.sh",
 

@@ -79,3 +79,13 @@ __pycache__/
 dist/
 build/
 *.pyc
+# ── Package Manager Auth (may contain tokens) ─────────────────────────────
+.npmrc
+.yarnrc
+.pypirc
+.netrc
+
+# ── Docker & Vault ─────────────────────────────────────────────────
+**/.docker/config.json
+**/vault-token*
+**/*.auto.tfvars

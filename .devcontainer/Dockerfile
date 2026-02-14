@@ -7,11 +7,10 @@
 #   2. System packages (build-essential, curl, git, etc.)
 #   3. Python 3.12
 #   4. Node.js 20
-#   5. GitHub CLI (for Copilot CLI)
-#   6. Python dev tools (black, ruff, poetry, etc.)
-#   7. Node.js dev tools (typescript, eslint, prettier)
-#   8. Security hardening (egress firewall, sudoers removal)
-#   9. Shell setup (Oh My Zsh)
+#   5. Python dev tools (black, ruff, poetry, etc.)
+#   6. Node.js dev tools (typescript, eslint, prettier)
+#   7. Security hardening (egress firewall, sudoers removal)
+#   8. Shell setup (Oh My Zsh)
 #
 # =============================================================================
 
@@ -33,7 +32,7 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-24.04
 # STEP 2: Build Arguments (can be overridden at build time)
 # -----------------------------------------------------------------------------
 # ARG defines variables available ONLY during the build.
-# Override at build time, e.g.: podman build --build-arg PYTHON_VERSION=3.11 .
+# Override at build time, e.g.: docker build --build-arg PYTHON_VERSION=3.11 .
 # -----------------------------------------------------------------------------
 ARG PYTHON_VERSION=3.12
 ARG NODE_VERSION=20
@@ -104,34 +103,14 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - \
 
 
 # -----------------------------------------------------------------------------
-# STEP 6: Install GitHub CLI (gh)
-# -----------------------------------------------------------------------------
-# The GitHub CLI is required to use the Copilot CLI extension.
-# Copilot CLI is NOT a standalone tool — it's an extension for gh.
-#
-# After installation you can:
-#   gh auth login              → GitHub authentication
-#   gh extension install ...   → Install extensions like Copilot CLI
-#   gh copilot suggest "..."   → Use Copilot CLI
-# -----------------------------------------------------------------------------
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-        | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-        | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update \
-    && apt-get install -y gh \
-    && rm -rf /var/lib/apt/lists/*
-
-
-# -----------------------------------------------------------------------------
-# STEP 7: Install pipx (as system package)
+# STEP 6: Install pipx (as system package)
 # -----------------------------------------------------------------------------
 # pipx is the recommended way to install Python CLI tools on Ubuntu 24.04
 # (PEP 668). It creates an isolated virtual environment for each tool —
 # no conflicts, no --break-system-packages needed.
 #
 # Installed via apt (system-wide). The actual tools are then installed
-# as the vscode user via pipx (STEP 9b).
+# as the vscode user via pipx (STEP 8b).
 # -----------------------------------------------------------------------------
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pipx \
@@ -139,7 +118,7 @@ RUN apt-get update \
 
 
 # -----------------------------------------------------------------------------
-# STEP 8: Install Node.js Dev Tools
+# STEP 7: Install Node.js Dev Tools
 # -----------------------------------------------------------------------------
 # Installed globally (-g) so they're available in every project:
 #
@@ -156,23 +135,28 @@ RUN npm install -g \
 
 
 # -----------------------------------------------------------------------------
-# STEP 8b: SECURITY – Install Egress Firewall Dependencies
+# STEP 7b: SECURITY – Install Egress Firewall Dependencies
 # -----------------------------------------------------------------------------
-# Installs iptables and ipset for the network egress whitelist.
-# The actual firewall script runs at container start (via entrypoint),
-# since DNS resolution at build time may yield different IPs than at
-# runtime.
+# Installs Squid (forward proxy) and iptables for domain-based egress
+# filtering. Squid filters by domain name (not IP), which is essential
+# for CDN-backed services where IPs rotate frequently.
+#
+# iptables enforces that all HTTP/HTTPS traffic goes through Squid —
+# direct outbound connections on ports 80/443 are blocked for all users
+# except the proxy user.
 #
 # SECURITY: Without egress filtering, AI agents can exfiltrate arbitrary
 # data via HTTP/HTTPS to external servers.
 # -----------------------------------------------------------------------------
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends iptables ipset \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends squid iptables \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /var/log/squid /var/spool/squid /var/cache/squid \
+    && chown -R proxy:proxy /var/log/squid /var/spool/squid /var/cache/squid
 
 
 # -----------------------------------------------------------------------------
-# STEP 8c: SECURITY – Remove Sudoers Entry
+# STEP 7c: SECURITY – Remove Sudoers Entry
 # -----------------------------------------------------------------------------
 # The Microsoft base image creates a sudoers entry granting the vscode
 # user passwordless root access: vscode ALL=(root) NOPASSWD:ALL
@@ -182,13 +166,13 @@ RUN apt-get update \
 # container immediately gets full root access.
 #
 # SECURITY: Defense-in-depth — explicitly remove unnecessary privileges.
-# If root access is needed in an emergency: use podman/docker exec -u root.
+# If root access is needed in an emergency: use docker exec -u root.
 # -----------------------------------------------------------------------------
 RUN rm -f /etc/sudoers.d/vscode
 
 
 # -----------------------------------------------------------------------------
-# STEP 8d: SECURITY – Install Egress Firewall Script
+# STEP 7d: SECURITY – Install Egress Firewall Script
 # -----------------------------------------------------------------------------
 # Copies the firewall script into the image and makes it executable.
 # It runs at container start via the entrypoint.
@@ -198,17 +182,30 @@ COPY egress-firewall.sh /usr/local/bin/egress-firewall.sh
 RUN chmod +x /usr/local/bin/egress-firewall.sh
 
 # -----------------------------------------------------------------------------
-# STEP 8e: SECURITY – Install Entrypoint
+# STEP 7e: SECURITY – Install Entrypoint
 # -----------------------------------------------------------------------------
-# The entrypoint starts the egress firewall as root before the container
-# process takes over as the vscode user.
+# The entrypoint starts the Squid proxy and egress firewall as root
+# before the container process takes over as the vscode user.
+# No DNS refresh daemon needed — Squid resolves domains on each request.
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# STEP 7f: SECURITY – Pre-populate /etc/environment for read-only mode
+# -----------------------------------------------------------------------------
+# VS Code Dev Containers normally patches /etc/environment at startup to
+# set PATH and SHELL. With --read-only, /etc is not writable. We pre-
+# populate the file during build so the container has the correct
+# environment from the start. The entrypoint creates marker files so
+# VS Code skips the patching step.
+# -----------------------------------------------------------------------------
+RUN echo 'PATH="/home/vscode/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/environment \
+    && echo 'SHELL="/usr/bin/zsh"' >> /etc/environment
+
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 
 # -----------------------------------------------------------------------------
-# STEP 9: Switch to Non-Root User
+# STEP 8: Switch to Non-Root User
 # -----------------------------------------------------------------------------
 # From here on, all commands run as the "vscode" user (not root).
 # This is important for:
@@ -221,7 +218,7 @@ WORKDIR /home/vscode
 
 
 # -----------------------------------------------------------------------------
-# STEP 9b: Install Python Dev Tools via pipx
+# STEP 8b: Install Python Dev Tools via pipx
 # -----------------------------------------------------------------------------
 # Now running as the vscode user, we install tools with pipx.
 # Each tool gets its own isolated virtual environment:
@@ -246,7 +243,7 @@ RUN pipx install poetry \
 
 
 # -----------------------------------------------------------------------------
-# STEP 10: Oh My Zsh
+# STEP 9: Oh My Zsh
 # -----------------------------------------------------------------------------
 # Oh My Zsh is already pre-installed in the base image
 # (mcr.microsoft.com/devcontainers/base) — reinstalling would fail since
@@ -255,19 +252,19 @@ RUN pipx install poetry \
 
 
 # -----------------------------------------------------------------------------
-# STEP 11: Set Default Shell
+# STEP 10: Set Default Shell
 # -----------------------------------------------------------------------------
 ENV SHELL=/usr/bin/zsh
 ENV PATH="/home/vscode/.local/bin:${PATH}"
 
 
 # -----------------------------------------------------------------------------
-# STEP 12: SECURITY – Entrypoint & CMD
+# STEP 11: SECURITY – Entrypoint & CMD
 # -----------------------------------------------------------------------------
 # The entrypoint starts as root (containerUser: root in devcontainer.json),
-# runs the egress firewall, and then hands off to the normal container
-# process. VS Code operates as remoteUser: vscode — separate from the
-# container user.
+# starts the Squid proxy, configures iptables to enforce proxy usage,
+# and then hands off to the normal container process.
+# VS Code operates as remoteUser: vscode — separate from the container user.
 # -----------------------------------------------------------------------------
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["sleep", "infinity"]

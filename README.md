@@ -19,7 +19,7 @@ This repository is a **template**. It contains a fully configured `.devcontainer
 │  │   your       │    │  │  Container           │  │ │
 │  │   machine)   │    │  │  • Python 3.12       │  │ │
 │  │              │    │  │  • Node.js 20        │  │ │
-│  │              │    │  │  • gh CLI + Copilot  │  │ │
+│  │              │    │  │  • GitHub Copilot    │  │ │
 │  │              │    │  │  • Egress Firewall   │  │ │
 │  │              │    │  │  • your project code │  │ │
 │  └──────────────┘    │  └──────────────────────┘  │ │
@@ -34,7 +34,7 @@ This repository is a **template**. It contains a fully configured `.devcontainer
 | **Languages**    | Python 3.12, Node.js 20                                        |
 | **Python**       | pip, poetry, black, ruff, ipython (via pipx)                   |
 | **Node.js**      | npm, TypeScript, ts-node, ESLint, Prettier                     |
-| **Git & GitHub** | Git, GitHub CLI (`gh`), Copilot CLI Extension                  |
+| **Git & GitHub** | Git                                                            |
 | **Editor**       | GitHub Copilot, Copilot Chat, Python/Pylance, ESLint, Prettier |
 | **Shell**        | zsh with Oh My Zsh                                             |
 
@@ -44,18 +44,19 @@ This repository is a **template**. It contains a fully configured `.devcontainer
 
 This dev container is hardened and specifically addresses risks introduced by AI agents (Copilot Agent Mode, MCP tools, etc.):
 
-| Measure                      | Details                                                                             |
-| ---------------------------- | ----------------------------------------------------------------------------------- |
-| **Rootless Container**       | Runs without host root privileges (Podman native, Docker compatible)                |
-| **Capability Drop**          | All Linux capabilities removed, only `NET_RAW`, `DAC_OVERRIDE`, `NET_ADMIN` allowed |
-| **No New Privileges**        | Processes cannot gain additional privileges                                         |
-| **Egress Firewall**          | Outbound network traffic restricted to a domain whitelist (iptables + ipset)        |
-| **SSH Agent Blocked**        | Host SSH keys are not available inside the container                                |
-| **Git Credential Isolation** | Credential helper limited to a short-lived cache (15 min)                           |
-| **Resource Limits**          | Memory (8 GB), CPUs (4), PIDs (512) — prevents DoS of the host                      |
-| **Sudoers Removed**          | No `sudo` available inside the container                                            |
-| **`.copilotignore`**         | Sensitive files are excluded from Copilot context                                   |
-| **Port Isolation**           | Only explicitly defined ports are forwarded                                         |
+| Measure                      | Details                                                                                 |
+| ---------------------------- | --------------------------------------------------------------------------------------- |
+| **Rootless Container**       | Runs without host root privileges                                                       |
+| **Capability Drop**          | All Linux capabilities removed, only `NET_RAW`, `DAC_OVERRIDE`, `NET_ADMIN` allowed     |
+| **No New Privileges**        | Processes cannot gain additional privileges                                             |
+| **Egress Firewall**          | Outbound network traffic restricted to a domain whitelist (Squid proxy + iptables DROP) |
+| **SSH Agent Blocked**        | Host SSH keys are not available inside the container                                    |
+| **Git Credential Isolation** | Credential helper limited to a short-lived cache (5 min)                                |
+| **Resource Limits**          | Memory (8 GB), CPUs (4), PIDs (512) — prevents DoS of the host                          |
+| **Sudoers Removed**          | No `sudo` available inside the container                                                |
+| **`.copilotignore`**         | Sensitive files are excluded from Copilot context                                       |
+| **Port Isolation**           | Only explicitly defined ports are forwarded                                             |
+| **Read-Only Filesystem**     | Container root filesystem is read-only; only tmpfs and /workspaces writable             |
 
 ---
 
@@ -65,8 +66,8 @@ This dev container is hardened and specifically addresses risks introduced by AI
 
 1. **VS Code** with the [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) extension (`ms-vscode-remote.remote-containers`)
 2. **Container Runtime** — one of the following:
-   - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (default)
-   - [Podman](https://podman.io/) (rootless, daemonless)
+   - [Rancher Desktop](https://rancherdesktop.io/) with dockerd backend — **recommended** (free, no license costs)
+   - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (license required for organizations >250 employees)
 
 ### Setup in 3 Steps
 
@@ -98,75 +99,53 @@ cp github-copilot-vscode-sandbox-container/.gitignore /path/to/your/project/
 - The status bar (bottom left) shows: `Dev Container: Sandboxed Dev Environment`
 - The terminal shows a zsh shell with Oh My Zsh
 
-#### 3. Authenticate GitHub CLI (for Copilot CLI)
-
-```bash
-# In the container terminal:
-gh auth login
-# → Follow the browser flow (enter the code)
-
-# Install the Copilot CLI extension
-gh extension install github/gh-copilot
-```
-
-> **Note:** The Copilot editor extension (inline suggestions + chat) works immediately — `gh auth login` is only needed for the CLI (`gh copilot suggest/explain`).
-
 ---
 
-## Podman Setup (macOS)
+## Rancher Desktop Setup (Recommended)
 
-If you use Podman instead of Docker, some additional setup is required.
+[Rancher Desktop](https://rancherdesktop.io/) provides a full Docker-compatible runtime without Docker Desktop license costs. It uses the open-source dockerd (moby) engine.
 
-### Install Podman
+### Install Rancher Desktop
 
 ```bash
-# Install via Homebrew
-brew install podman
+# macOS
+brew install --cask rancher
 
-# Create a lightweight Linux VM (macOS has no Linux kernel)
-podman machine init --cpus 4 --memory 4096
-
-# Start the VM (required once after every reboot)
-podman machine start
-
-# Verify everything works
-podman info
+# Linux — see https://docs.rancherdesktop.io/getting-started/installation/#linux
 ```
 
-> **Note:** You need to run `podman machine start` once after every Mac reboot before using the dev container.
+### Configure Rancher Desktop
 
-### Configure VS Code for Podman
+1. Open Rancher Desktop
+2. Go to **Preferences → Container Engine → dockerd (moby)**
+3. Verify it works:
 
-Add these settings to your VS Code User Settings (JSON) via `Cmd+Shift+P` → "Preferences: Open User Settings (JSON)":
+```bash
+docker info
+```
+
+### Configure VS Code
+
+Add this setting to your VS Code User Settings (JSON) via `Cmd+Shift+P` → "Preferences: Open User Settings (JSON)":
 
 ```json
 {
-  "dev.containers.dockerPath": "podman",
-  "dev.containers.dockerComposePath": "podman-compose"
+  "dev.containers.dockerPath": "docker"
 }
 ```
 
-### Podman Cheat Sheet
+### Docker Cheat Sheet
 
 ```bash
-# ── VM Management ──
-podman machine list              # List all VMs and their status
-podman machine start             # Start VM (required after reboot)
-podman machine stop              # Stop VM (saves resources)
-podman machine rm                # Delete VM completely
-
 # ── Containers ──
-podman ps                        # List running containers
-podman ps -a                     # List all containers (including stopped)
-podman exec -it <id> zsh         # Open shell in running container
-podman logs <id>                 # Show container logs
+docker ps                        # List running containers
+docker ps -a                     # List all containers (including stopped)
+docker exec -it <id> zsh         # Open shell in running container
+docker logs <id>                 # Show container logs
 
 # ── Cleanup ──
-podman system prune -a           # Remove all unused images/containers
-podman volume prune              # Remove unused volumes
-
-# ── Update ──
-brew upgrade podman              # Update Podman
+docker system prune -a           # Remove all unused images/containers
+docker volume prune              # Remove unused volumes
 ```
 
 ---
@@ -235,7 +214,7 @@ Add this to `runArgs` in `devcontainer.json`:
 
 ```bash
 # Clear image cache and rebuild
-docker system prune -a    # or: podman system prune -a
+docker system prune -a
 
 # In VS Code: Cmd+Shift+P → "Dev Containers: Rebuild Container"
 ```
@@ -250,8 +229,6 @@ Since `sudo` has been removed, root access is only possible from outside the con
 
 ```bash
 docker exec -u root <container-id> chown -R vscode:vscode /workspaces
-# or:
-podman exec -u root <container-id> chown -R vscode:vscode /workspaces
 ```
 
 ### Copilot Extension Not Loading
@@ -264,26 +241,6 @@ code --list-extensions | grep copilot
 # Cmd+Shift+P → "Dev Containers: Rebuild Container"
 ```
 
-### "Cannot connect to Podman" / "Connection Refused"
-
-The Podman VM is not running:
-
-```bash
-podman machine start
-```
-
-### Container Is Slow
-
-Too few resources allocated to the Podman VM:
-
-```bash
-# Stop, delete, and recreate with more resources
-podman machine stop
-podman machine rm
-podman machine init --cpus 6 --memory 8192
-podman machine start
-```
-
 ---
 
 ## How Security Works in Detail
@@ -293,34 +250,101 @@ podman machine start
 ```
 1. Container starts as root (containerUser: root)
 2. entrypoint.sh is executed:
-   └── egress-firewall.sh sets iptables rules
-       ├── Domains from allowed-domains.conf → DNS → IP addresses → ipset
-       ├── Only whitelisted IPs allowed on port 80/443
-       └── Everything else is dropped
+   └── egress-firewall.sh configures Squid proxy
+       ├── Domains from allowed-domains.conf → Squid ACL
+       ├── Squid proxy starts on localhost:3128
+       ├── iptables DROP rules (only proxy user can reach internet)
+       └── If Squid fails → container startup ABORTS (fail-closed)
 3. VS Code connects as user "vscode" (remoteUser)
 4. post-create.sh runs once:
    ├── Git credential hardening (cache instead of host forwarding)
-   ├── Install Copilot CLI (if gh is authenticated)
    └── Install Python/Node dependencies (if present)
 ```
 
 ### What Is Isolated?
 
-| Area                 | Status | Explanation                                    |
-| -------------------- | ------ | ---------------------------------------------- |
-| **Host Filesystem**  | ✅     | Only your project folder is visible            |
-| **SSH Keys**         | ✅     | SSH agent forwarding disabled                  |
-| **Git Credentials**  | ✅     | Short-lived cache (15 min), no host forwarding |
-| **Network (Egress)** | ✅     | Only whitelisted domains reachable             |
-| **Root Privileges**  | ✅     | sudo removed, no-new-privileges active         |
-| **Resources**        | ✅     | Memory, CPU, PID limits enforced               |
-| **Ports**            | ✅     | Only explicitly defined ports forwarded        |
+| Area                 | Status | Explanation                                   |
+| -------------------- | ------ | --------------------------------------------- |
+| **Host Filesystem**  | ✅     | Only your project folder is visible           |
+| **SSH Keys**         | ✅     | SSH agent forwarding disabled                 |
+| **Git Credentials**  | ✅     | Short-lived cache (5 min), no host forwarding |
+| **Network (Egress)** | ✅     | Only whitelisted domains reachable            |
+| **Root Privileges**  | ✅     | sudo removed, no-new-privileges active        |
+| **Resources**        | ✅     | Memory, CPU, PID limits enforced              |
+| **Ports**            | ✅     | Only explicitly defined ports forwarded       |
 
 ### Known Limitations
 
-- The egress firewall resolves domains to IPs at container startup. CDN IP rotation may require a container restart.
-- Data exfiltration to whitelisted hosts (e.g., via GitHub Gist) remains theoretically possible.
-- For production environments, a content-inspection proxy is recommended for stronger egress control.
+This sandbox significantly reduces the attack surface for AI agents, but **no sandbox is 100% secure**. Security is always a cost/benefit trade-off. The following limitations are accepted risks:
+
+#### 1. Egress Firewall Enforcement
+
+The egress firewall uses iptables DROP rules with `--uid-owner` exceptions to **enforce** that all HTTP/HTTPS traffic goes through the Squid proxy. This means `unset HTTP_PROXY` or direct socket connections are **blocked at the kernel level** — only the Squid proxy user can make direct outbound connections.
+
+A transparent proxy via iptables REDIRECT is not feasible because it would only work for HTTP (port 80). For HTTPS (port 443), the proxy cannot inspect encrypted traffic without TLS interception (MITM), which breaks certificate pinning and would cause Copilot/GitHub connections to fail.
+
+> **Monitoring tip:** Check for blocked bypass attempts with `dmesg | grep EGRESS_BLOCKED`.
+
+#### 2. Data Exfiltration via Whitelisted Domains
+
+Even with perfect egress filtering, whitelisted domains can be used as exfiltration channels:
+
+| Channel            | Domain                    | Method                              |
+| ------------------ | ------------------------- | ----------------------------------- |
+| GitHub Gist/API    | `github.com`              | `POST https://api.github.com/gists` |
+| Azure Blob Storage | `*.blob.core.windows.net` | Upload to any storage account       |
+| Notion API         | `api.notion.com`          | Create pages with data              |
+| npm Publish        | `registry.npmjs.org`      | Publish package with data           |
+
+This is an inherent trade-off: blocking these domains would break core functionality (Git, package installation, MCP servers). For environments handling highly sensitive data, consider a content-inspection proxy (e.g., mitmproxy) for deep packet inspection.
+
+**Mitigation:** Review and narrow the domain whitelist in `allowed-domains.conf` for your use case. Remove domains for services you don't use (Figma, Miro, Notion, Amplitude). Replace broad Azure wildcards (`*.blob.core.windows.net`) with your specific account URLs where possible.
+
+#### 3. DNS Tunneling
+
+DNS traffic (UDP/TCP port 53) is allowed without restriction to ensure name resolution works. This means data could theoretically be exfiltrated by encoding it in DNS queries to an attacker-controlled domain.
+
+**Mitigation:** Restrict DNS to the container's DNS resolver (`127.0.0.11` for Docker) via additional iptables rules. This is not done by default because the required resolver address varies between container runtimes.
+
+#### 4. NET_RAW Capability
+
+The `NET_RAW` capability is required for DNS resolution and general network connectivity. However, it also enables raw socket creation, which could be used for ICMP tunneling or network scanning.
+
+**Mitigation:** Add `iptables -A OUTPUT -p icmp -j DROP` to `egress-firewall.sh` if ICMP is not needed. Consider a custom seccomp profile to block `socket(AF_PACKET, ...)` calls.
+
+#### 5. Wildcard Domains in allowed-domains.conf
+
+Some entries in `allowed-domains.conf` use wildcards (e.g., `*.blob.core.windows.net`, `*.visualstudio.com`). These grant access to **all** subdomains, including potentially attacker-controlled ones.
+
+**Important:** Domains in `allowed-domains.conf` without a `*` prefix match **only the exact domain** — subdomains are not automatically included. If you need subdomains, use the explicit `*.example.com` syntax. Review the domain list and narrow wildcards to specific instances where possible.
+
+#### 6. No MCP Server Restrictions
+
+The dev container does not restrict which [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) servers can be used by Copilot Agent Mode. Any MCP server that connects to a whitelisted domain will work. Organizations should define MCP server policies via GitHub Enterprise Copilot settings or VS Code organizational policies.
+
+#### 7. Git Credentials
+
+Git credentials are cached for 5 minutes after explicit authentication by the user. During this window, any process (including AI agents) can perform Git operations. The host's credential helper is **not** forwarded — only the short-lived in-memory cache is available.
+
+**Hardening options:**
+
+- Reduce timeout further: Change `--timeout=300` to a lower value in `post-create.sh`
+- Disable entirely: Set `git config --global credential.helper ''` — but this means `git push` / `git pull` to private repos will not work at all
+
+#### 8. Package Installation (Supply Chain)
+
+PyPI and npm registries are whitelisted, allowing AI agents to install arbitrary packages. Malicious or typosquatted packages can execute arbitrary code via post-install scripts.
+
+**Mitigation:** Use a private package registry with curation (e.g., Artifactory, Nexus), `pip install --require-hashes`, or restrict registry access to specific packages.
+
+### Potential Improvements
+
+These are not implemented but could further harden the container for high-security environments:
+
+- **Audit Logging:** Install `auditd` or configure persistent shell history (`HISTFILE` + `PROMPT_COMMAND`) to enable forensic analysis of AI agent actions. Persist Squid `access.log` via a volume mount.
+- **Custom Seccomp Profile:** Block unnecessary syscalls (`ptrace`, `mount`, `keyctl`) via `--security-opt seccomp=custom-profile.json`.
+- **Container Image Pinning:** Pin the base image by SHA256 digest instead of tag to prevent supply chain attacks via compromised registry mirrors.
+- **Content-Inspection Proxy:** Deploy mitmproxy or a similar tool for deep packet inspection on whitelisted domains (detects data exfiltration in request bodies).
 
 ---
 
