@@ -1,0 +1,1 @@
+# github-copilot-vscode-sandbox-container
