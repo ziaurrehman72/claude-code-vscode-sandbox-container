@@ -413,12 +413,24 @@ PyPI and npm registries are whitelisted, allowing AI agents to install arbitrary
 
 **Mitigation:** Use a private package registry with curation (e.g., Artifactory, Nexus), `pip install --require-hashes`, or restrict registry access to specific packages.
 
+#### 8. Writable Project Directory (`/workspaces`)
+
+The `/workspaces` directory is writable by design — AI agents need to create and modify project files. However, this also allows:
+
+- **Git hook manipulation:** An agent can create or modify `.git/hooks/pre-commit` (or other hooks) to execute arbitrary code on the next `git commit`.
+- **Config file changes:** `.vscode/settings.json`, `.env` files, or CI/CD configs can be modified silently.
+
+**Mitigation:** Use `core.hooksPath` pointing to a read-only directory for Git hooks. Always review AI-generated changes before committing — treat agent output like an untrusted pull request.
+
 ### Potential Improvements
 
 These are not implemented but could further harden the container for high-security environments:
 
+- **Automated Base Image Updates:** Configure [Dependabot](https://docs.github.com/en/code-security/dependabot) or [Renovate](https://github.com/renovatebot/renovate) to automatically update the pinned Docker image digest in the Dockerfile. Pair with a CI pipeline running image scanning (e.g., [Trivy](https://github.com/aquasecurity/trivy), [Grype](https://github.com/anchore/grype)) to detect known CVEs before deployment.
 - **Audit Logging:** Install `auditd` or configure persistent shell history (`HISTFILE` + `PROMPT_COMMAND`) to enable forensic analysis of AI agent actions. Persist Squid `access.log` via a volume mount.
 - **Custom Seccomp Profile:** Block unnecessary syscalls (`ptrace`, `mount`, `keyctl`) via `--security-opt seccomp=custom-profile.json`.
+- **AppArmor / SELinux Profile:** Provide a custom AppArmor profile (Ubuntu hosts) or SELinux policy (RHEL/Fedora hosts) to restrict file access beyond what the read-only filesystem and capabilities already enforce.
+- **Reduce Required Capabilities:** The `SETUID`, `SETGID`, and `CHOWN` capabilities are currently needed for Squid's privilege drop to the `proxy` user. Evaluating a lighter-weight forward proxy (e.g., tinyproxy) or running Squid directly as the `proxy` user could eliminate the need for these capabilities. Note: `no-new-privileges` and SUID-bit stripping already neutralize most of the risk.
 - **Content-Inspection Proxy:** Deploy mitmproxy or a similar tool for deep packet inspection on whitelisted domains (detects data exfiltration in request bodies).
 
 ---

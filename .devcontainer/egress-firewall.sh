@@ -245,8 +245,10 @@ iptables -A OUTPUT -d 169.254.169.254/32 -j DROP 2>/dev/null || true
 
 # ── Allow container-internal traffic ─────────────────────────────────────────
 # Docker default bridge: 172.17.0.0/16, user-defined: 172.18-31.x.x
+# All three RFC 1918 private ranges are allowed (consistent with NO_PROXY).
 iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT 2>/dev/null || true
 iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT 2>/dev/null || true
+iptables -A OUTPUT -d 192.168.0.0/16 -j ACCEPT 2>/dev/null || true
 
 # ── Allow proxy user (Squid) to make direct outbound connections ─────────────
 iptables -A OUTPUT -p tcp --dport 80 -m owner --uid-owner "$PROXY_UID" -j ACCEPT 2>/dev/null || {
