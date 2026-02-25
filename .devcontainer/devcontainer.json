@@ -24,7 +24,7 @@
   //
   // Security: no-new-privileges, cap-drop=ALL (re-add only required caps),
   //           read-only root filesystem, resource limits.
-  // Capabilities: NET_RAW (DNS), DAC_OVERRIDE (VS Code Server),
+  // Capabilities: DAC_OVERRIDE (VS Code Server),
   //               NET_ADMIN (iptables), SETUID/SETGID (Squid privilege drop),
   //               CHOWN (Squid dir ownership).
   // tmpfs: Writable scratch space for /tmp, /run, /etc/squid, Squid logs,
@@ -33,7 +33,6 @@
   "runArgs": [
     "--security-opt=no-new-privileges",
     "--cap-drop=ALL",
-    "--cap-add=NET_RAW",
     "--cap-add=DAC_OVERRIDE",
     "--cap-add=NET_ADMIN",
     "--cap-add=SETUID",

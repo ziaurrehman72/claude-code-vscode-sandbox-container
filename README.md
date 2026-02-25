@@ -47,7 +47,7 @@ This dev container is hardened and specifically addresses risks introduced by AI
 | Measure                      | Details                                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------- |
 | **Rootless Container**       | Runs without host root privileges                                                                       |
-| **Capability Drop**          | All Linux capabilities removed, only `NET_RAW`, `DAC_OVERRIDE`, `NET_ADMIN` allowed; SUID bits stripped |
+| **Capability Drop**          | All Linux capabilities removed, only `DAC_OVERRIDE`, `NET_ADMIN` allowed; SUID bits stripped            |
 | **No New Privileges**        | Processes cannot gain additional privileges                                                             |
 | **Egress Firewall**          | Outbound network traffic restricted to a domain whitelist (Squid proxy + iptables DEFAULT-DROP)         |
 | **SSH Agent Blocked**        | Host SSH keys are not available inside the container                                                    |
@@ -382,23 +382,17 @@ Direct DNS queries to external DNS servers are **blocked and logged** — only t
 
 > **Monitoring tip:** Check for blocked direct DNS attempts with `dmesg | grep EGRESS_BLOCKED_DNS`.
 
-#### 3. NET_RAW Capability
-
-The `NET_RAW` capability is required for DNS resolution and general network connectivity. ICMP is blocked by the iptables DEFAULT-DROP policy (logged via `EGRESS_BLOCKED_ICMP`), but `NET_RAW` still allows raw socket creation (`AF_PACKET`), which could be used for network scanning within the container network.
-
-**Mitigation:** Add a custom seccomp profile to block `socket(AF_PACKET, ...)` calls.
-
-#### 4. Wildcard Domains in allowed-domains.conf
+#### 3. Wildcard Domains in allowed-domains.conf
 
 Some entries in `allowed-domains.conf` use wildcards (e.g., `*.blob.core.windows.net`, `*.visualstudio.com`). These grant access to **all** subdomains, including potentially attacker-controlled ones.
 
 **Important:** Domains in `allowed-domains.conf` without a `*` prefix match **only the exact domain** — subdomains are not automatically included. If you need subdomains, use the explicit `*.example.com` syntax. Review the domain list and narrow wildcards to specific instances where possible.
 
-#### 5. No MCP Server Restrictions
+#### 4. No MCP Server Restrictions
 
 The dev container does not restrict which [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) servers can be used by Copilot Agent Mode. Any MCP server that connects to a whitelisted domain will work. Organizations should define MCP server policies via GitHub Enterprise Copilot settings or VS Code organizational policies.
 
-#### 6. Git Credentials
+#### 5. Git Credentials
 
 Git credentials are cached for 60 seconds after explicit authentication by the user. During this window, any process (including AI agents) can perform Git operations. The host's credential helper is **not** forwarded — only the short-lived in-memory cache is available.
 
@@ -407,13 +401,13 @@ Git credentials are cached for 60 seconds after explicit authentication by the u
 - Reduce timeout further: Change `--timeout=60` to a lower value in `post-create.sh`
 - Disable entirely: Set `git config --global credential.helper ''` — but this means `git push` / `git pull` to private repos will not work at all (since `GIT_TERMINAL_PROMPT=0` prevents interactive prompts)
 
-#### 7. Package Installation (Supply Chain)
+#### 6. Package Installation (Supply Chain)
 
 PyPI and npm registries are whitelisted, allowing AI agents to install arbitrary packages. Malicious or typosquatted packages can execute arbitrary code via post-install scripts.
 
 **Mitigation:** Use a private package registry with curation (e.g., Artifactory, Nexus), `pip install --require-hashes`, or restrict registry access to specific packages.
 
-#### 8. Writable Project Directory (`/workspaces`)
+#### 7. Writable Project Directory (`/workspaces`)
 
 The `/workspaces` directory is writable by design — AI agents need to create and modify project files. However, this also allows:
 
