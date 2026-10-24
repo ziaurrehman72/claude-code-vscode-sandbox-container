@@ -32,7 +32,7 @@ This repository is a **template**. It contains a fully configured `.devcontainer
 | Category         | Tools                                                          |
 | ---------------- | -------------------------------------------------------------- |
 | **Languages**    | Python 3.12, Node.js 20 (via nvm - switchable)                 |
-| **Python**       | pip, poetry, black, ruff, ipython (via pipx)                   |
+| **Python**       | pip, pipx; poetry, black, ruff, ipython (read-only, see [below](#python-tools-and-the-home-directory)) |
 | **Node.js**      | npm, nvm (install any version with `nvm install <version>`)    |
 | **Git & GitHub** | Git                                                            |
 | **AI Assistant** | GitHub Copilot + Chat and/or Claude Code (CLI + extension)     |
@@ -69,6 +69,8 @@ This dev container is hardened and specifically addresses risks introduced by AI
 | **Claude Managed Settings**  | Read access to secret files (`.env`, keys, credentials) denied via read-only `/etc/claude-code/managed-settings.json` |
 | **Port Isolation**           | Only explicitly defined ports are forwarded                                                             |
 | **Read-Only Filesystem**     | Container root filesystem is read-only; only tmpfs and /workspaces writable                             |
+| **Ephemeral Home**           | `/home/vscode` is an in-memory tmpfs, reset to clean dotfiles on every start                            |
+| **Tamper-Proof Dev Tools**   | Preinstalled Python tools live on the read-only filesystem (`/opt/pipx`), so agents cannot modify them  |
 
 ## File Structure
 
@@ -266,6 +268,24 @@ In each variant's `devcontainer.json` under `runArgs`. The three variants intent
 "--pids-limit=512"   // Max processes
 ```
 
+## Python Tools and the Home Directory
+
+The home directory `/home/vscode` is an in-memory tmpfs: it starts empty on every container start, and anything written to it is gone after a restart. On start, `entrypoint.sh` fills it with the base image's dotfiles (`.zshrc`, Oh My Zsh, `.bashrc`, …) from `/opt/home-skel`.
+
+The preinstalled tools (poetry, black, ruff, ipython) are installed system-wide in `/opt/pipx`, with commands in `/usr/local/bin`. They are on the read-only filesystem, so an agent can't modify them. The data they write at runtime is still writable:
+
+| Data                                         | Location                          | Survives restart? |
+| -------------------------------------------- | --------------------------------- | ----------------- |
+| Preinstalled tools                           | `/opt/pipx`, `/usr/local/bin`     | ✅ (read-only)    |
+| Your project, incl. `.venv` / tool caches    | `/workspaces/<project>`           | ✅                |
+| Claude Code login/config                     | `~/.claude` (Docker volume)       | ✅                |
+| pip/poetry caches, shell history, `~/.config` | `/home/vscode/...`                | ❌ wiped          |
+| `pip install --user`, `pipx install <tool>`  | `~/.local`                        | ❌ wiped          |
+
+- **Keep environments in the project.** Poetry is preconfigured with `POETRY_VIRTUALENVS_IN_PROJECT=true`, so `poetry install` creates `<project>/.venv`, which persists. Do the same for plain venvs: `python -m venv .venv` inside the project.
+- **Extra tools for a session:** `pipx install <tool>` works and installs into `~/.local` until the next restart.
+- **Permanent extra tools, or a different version:** add a `pipx install <tool>` line to the system-wide pipx step in `.devcontainer/shared/Dockerfile` and rebuild. `pipx upgrade` and `poetry self add` don't work on the read-only preinstalled tools.
+
 ## Port Forwarding
 
 Ports `3000`, `5000`, `8000`, `8080` are forwarded by default. Adjust in each variant's `devcontainer.json` under `forwardPorts`. Additional ports can be forwarded manually in VS Code (`Cmd+Shift+P` (macOS) / `Ctrl+Shift+P` (Windows/Linux) → "Forward a Port").
@@ -289,6 +309,7 @@ Add this to `runArgs` in `devcontainer.json`:
 ```
 1. Container starts as root (containerUser: root), with AI_PROFILE set by the variant
 2. entrypoint.sh is executed:
+   ├── Empty tmpfs home ← dotfiles from /opt/home-skel (owner vscode, mode 750)
    └── egress-firewall.sh configures Squid proxy
        ├── domains/common.conf + domains/<AI_PROFILE>.conf → Squid ACL
        │   (unknown profile or missing file → startup ABORTS)

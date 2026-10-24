@@ -46,9 +46,10 @@
   //           read-only root filesystem, resource limits.
   // Capabilities: DAC_OVERRIDE (VS Code Server),
   //               NET_ADMIN (iptables), SETUID/SETGID (Squid privilege drop),
-  //               CHOWN (Squid dir ownership, ~/.claude volume ownership).
+  //               CHOWN (Squid dirs, tmpfs home, ~/.claude volume ownership).
   // tmpfs: Writable scratch space for /tmp, /run, /etc/squid, Squid logs,
-  //        /home/vscode, /var/devcontainer.
+  //        /home/vscode (wiped on restart; dotfiles restored by entrypoint.sh),
+  //        /var/devcontainer.
   // -------------------------------------------------------------------------
   "runArgs": [
     "--security-opt=no-new-privileges",

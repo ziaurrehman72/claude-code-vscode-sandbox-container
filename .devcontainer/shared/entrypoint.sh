@@ -9,11 +9,15 @@
 
 set -euo pipefail
 
-# ── Fix tmpfs ownership ──────────────────────────────────────────────────────
-# The --read-only flag with --tmpfs mounts creates tmpfs directories owned by
-# root. The vscode user needs write access to their home directory for VS Code
-# Server, shell config, pipx, etc.
+# ── Populate the tmpfs home ──────────────────────────────────────────────────
+# --tmpfs=/home/vscode starts empty and root-owned, hiding the image's home
+# directory. Restore the base dotfiles (.zshrc, Oh My Zsh, ...) from the
+# skeleton baked into the image. Dev tools live in /opt + /usr/local/bin.
+# The copy runs as vscode: root may chown (CAP_CHOWN) but not chmod files it
+# doesn't own (CAP_FOWNER is dropped), so `cp -a` as root would fail.
+chmod 750 /home/vscode
 chown vscode:vscode /home/vscode
+setpriv --reuid=vscode --regid=vscode --init-groups cp -a /opt/home-skel/. /home/vscode/
 
 # Claude Code config volume (claude/both variants) is created root-owned.
 if [ -d /home/vscode/.claude ]; then

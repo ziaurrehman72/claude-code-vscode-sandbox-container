@@ -59,6 +59,25 @@ RUN find / -path /proc -prune -o -path /sys -prune -o -type f -perm /6000 -print
     | xargs -r chmod u-s,g-s 2>/dev/null || true
 
 
+# --- Python Dev Tools via pipx (poetry, black, ruff, ipython), installed system-wide ---
+# /home/vscode is an empty tmpfs at runtime, so anything installed into it here
+# would be hidden. Installing into /opt + /usr/local/bin keeps the tools visible
+# and, on the read-only root fs, tamper-proof. The PIPX_* vars apply to this step
+# only: at runtime `pipx install <tool>` still works and goes to ~/.local
+# (writable, but wiped on restart).
+RUN export PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin \
+        PIPX_MAN_DIR=/usr/local/share/man PIP_NO_CACHE_DIR=1 \
+    && pipx install poetry \
+    && pipx install black \
+    && pipx install ruff \
+    && pipx install ipython \
+    && rm -rf /root/.cache
+
+# --- Home skeleton: base image dotfiles (.zshrc, Oh My Zsh, .bashrc, ...) ---
+# Copied into the empty tmpfs home by entrypoint.sh on every start.
+RUN cp -a /home/vscode /opt/home-skel
+
+
 # --- SECURITY: Egress firewall script (runs at container start via entrypoint) ---
 # Domain files: common.conf + per-assistant files, selected at runtime by AI_PROFILE.
 COPY domains/ /usr/local/etc/allowed-domains.d/
@@ -88,20 +107,14 @@ USER vscode
 WORKDIR /home/vscode
 
 
-# --- Python Dev Tools via pipx (poetry, black, ruff, ipython) ---
-RUN pipx install poetry \
-    && pipx install black \
-    && pipx install ruff \
-    && pipx install ipython \
-    && pipx ensurepath
-
-
-# Oh My Zsh: pre-installed in base image, no action needed.
-
-
 # --- Default Shell & PATH ---
+# ~/.local/bin holds tools a user installs at runtime (session-only).
 ENV SHELL=/usr/bin/zsh
 ENV PATH="/home/vscode/.local/bin:${PATH}"
+
+# Keep Poetry virtualenvs in the project (<project>/.venv), which persists.
+# The default (~/.cache/pypoetry/virtualenvs) is on the tmpfs and wiped on restart.
+ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 
 
 # --- Entrypoint (runs as root → starts Squid + iptables → hands off to CMD) ---
