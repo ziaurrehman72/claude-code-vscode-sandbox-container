@@ -10,14 +10,18 @@
 # Squid sees domains via Host header (HTTP) / CONNECT method (HTTPS),
 # so CDN IP rotation is irrelevant. No TLS interception needed.
 #
-# Domain whitelist: /usr/local/etc/allowed-domains.conf
+# Domain whitelist: /usr/local/etc/allowed-domains.d/common.conf plus one
+#   <profile>.conf per entry in AI_PROFILE (comma-separated, e.g.
+#   "copilot", "claude", "copilot,claude"). Set via containerEnv in the
+#   variant's devcontainer.json.
 # Bypass monitoring: dmesg | grep EGRESS_BLOCKED
 #
 # =============================================================================
 
 set -euo pipefail
 
-DOMAINS_FILE="/usr/local/etc/allowed-domains.conf"
+DOMAINS_DIR="/usr/local/etc/allowed-domains.d"
+AI_PROFILE="${AI_PROFILE:-copilot}"
 SQUID_CONF="/etc/squid/squid.conf"
 SQUID_ACL_FILE="/etc/squid/allowed-domains.acl"
 SQUID_LOG_DIR="/var/log/squid"
@@ -25,17 +29,32 @@ PROXY_PORT=3128
 
 echo "🔒 Egress firewall: configuring domain-based proxy filter..."
 
-# ── Validate domain whitelist ────────────────────────────────────────────────
-if [ ! -f "$DOMAINS_FILE" ]; then
-    echo "⚠️  Domain whitelist not found: $DOMAINS_FILE"
-    echo "   Egress firewall will NOT be activated."
-    exit 1
-fi
+# ── Resolve domain whitelist files from AI_PROFILE ───────────────────────────
+# Fail closed: an unknown/malformed profile or a missing file aborts startup.
+DOMAIN_FILES=("$DOMAINS_DIR/common.conf")
+IFS=',' read -ra PROFILES <<< "$AI_PROFILE"
+for profile in "${PROFILES[@]}"; do
+    profile=$(echo "$profile" | xargs)
+    if [[ ! "$profile" =~ ^[a-z0-9-]+$ ]]; then
+        echo "❌ Invalid AI_PROFILE entry: '${profile}' (AI_PROFILE='${AI_PROFILE}')"
+        exit 1
+    fi
+    DOMAIN_FILES+=("$DOMAINS_DIR/${profile}.conf")
+done
 
-# ── Generate Squid ACL from allowed-domains.conf ─────────────────────────────
+for f in "${DOMAIN_FILES[@]}"; do
+    if [ ! -f "$f" ]; then
+        echo "❌ Domain whitelist not found: $f"
+        echo "   Egress firewall will NOT be activated."
+        exit 1
+    fi
+done
+
+# ── Generate Squid ACL from domain files ─────────────────────────────────────
 # *.example.com → .example.com (Squid wildcard), plain → exact match only
 # ─────────────────────────────────────────────────────────────────────────────
-echo "   📄 Generating Squid ACL from $DOMAINS_FILE..."
+echo "   📄 Profile: ${AI_PROFILE}"
+echo "   📄 Generating Squid ACL from: ${DOMAIN_FILES[*]}"
 
 : > "$SQUID_ACL_FILE"  # truncate
 
@@ -69,14 +88,16 @@ while IFS= read -r line; do
         # If .example.com wildcard was already added, remove it (exact domain subsumes it)
         if [[ -n "${WILD_DOMAINS[$line]:-}" ]]; then
             echo "   ⚠️  Removing redundant wildcard for: $line (exact domain covers subdomains)"
-            sed -i "/^\.$line$/d" "$SQUID_ACL_FILE"
+            escaped_line=${line//./\\.}
+            sed -i "/^\\.${escaped_line}\$/d" "$SQUID_ACL_FILE"
             SKIPPED=$((SKIPPED + 1))
         fi
         EXACT_DOMAINS["$line"]=1
         echo "$line" >> "$SQUID_ACL_FILE"
     fi
     DOMAIN_COUNT=$((DOMAIN_COUNT + 1))
-done < "$DOMAINS_FILE"
+# echo after each file guards against a missing trailing newline merging lines
+done < <(for f in "${DOMAIN_FILES[@]}"; do cat "$f"; echo; done)
 
 if [ $SKIPPED -gt 0 ]; then
     echo "   ℹ️  Deduplicated $SKIPPED overlapping domain(s) (Squid 6.x compatibility)"
@@ -319,7 +340,8 @@ echo "   ═══════════════════════�
 echo "   🛡️  EGRESS FIREWALL ACTIVE (Domain-based proxy filtering)"
 echo "   ───────────────────────────────────────────────────────────────"
 echo "   Proxy:    localhost:${PROXY_PORT}"
-echo "   Domains:  ${DOMAIN_COUNT} allowed (see $DOMAINS_FILE)"
+echo "   Profile:  ${AI_PROFILE}"
+echo "   Domains:  ${DOMAIN_COUNT} allowed (see $DOMAINS_DIR)"
 echo "   Mode:     Squid proxy + iptables DEFAULT-DROP (enforced)"
 echo "   DNS:      Restricted to ${CONTAINER_DNS} (tunneling blocked)"
 echo "   Blocked:  dmesg | grep EGRESS_BLOCKED"

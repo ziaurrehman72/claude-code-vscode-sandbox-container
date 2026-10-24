@@ -1,0 +1,130 @@
+// devcontainer.json – Variant: GitHub Copilot
+// Docs: https://containers.dev/implementors/json_reference/
+//
+// One of three variants (copilot / claude / both) sharing .devcontainer/shared/.
+// VS Code shows a picker on "Reopen in Container"; switch via "Rebuild Container".
+// Keep runArgs / remoteEnv / security settings IN SYNC with the sibling variants.
+{
+  "name": "Sandbox – GitHub Copilot",
+
+  "build": {
+    "dockerfile": "../shared/Dockerfile",
+    "context": "../shared"
+  },
+
+  // -------------------------------------------------------------------------
+  // features: Dev Container Features for language runtimes.
+  // Node.js is installed via the official feature (nvm-based, GPG-verified).
+  // Default version is 20; devs can switch with `nvm install <version>`.
+  // -------------------------------------------------------------------------
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20"
+    }
+  },
+
+  // Selects the egress allowlist: domains/common.conf + domains/<profile>.conf
+  "containerEnv": {
+    "AI_PROFILE": "copilot"
+  },
+
+  // -------------------------------------------------------------------------
+  // runArgs: Container runtime security and resource configuration.
+  //
+  // Security: no-new-privileges, cap-drop=ALL (re-add only required caps),
+  //           read-only root filesystem, resource limits.
+  // Capabilities: DAC_OVERRIDE (VS Code Server),
+  //               NET_ADMIN (iptables), SETUID/SETGID (Squid privilege drop),
+  //               CHOWN (Squid dir ownership).
+  // tmpfs: Writable scratch space for /tmp, /run, /etc/squid, Squid logs,
+  //        /home/vscode, /var/devcontainer.
+  // -------------------------------------------------------------------------
+  "runArgs": [
+    "--security-opt=no-new-privileges",
+    "--cap-drop=ALL",
+    "--cap-add=DAC_OVERRIDE",
+    "--cap-add=NET_ADMIN",
+    "--cap-add=SETUID",
+    "--cap-add=SETGID",
+    "--cap-add=CHOWN",
+    "--memory=8g",
+    "--cpus=4",
+    "--pids-limit=512",
+    "--read-only",
+    "--tmpfs=/tmp:rw,noexec,nosuid,size=2g",
+    "--tmpfs=/run:rw,nosuid,size=64m",
+    "--tmpfs=/etc/squid:rw,nosuid,size=16m",
+    "--tmpfs=/var/log/squid:rw,nosuid,size=128m",
+    "--tmpfs=/var/spool/squid:rw,nosuid,size=256m",
+    "--tmpfs=/var/cache/squid:rw,nosuid,size=256m",
+    "--tmpfs=/home/vscode:rw,exec,nosuid,size=4g",
+    "--tmpfs=/var/devcontainer:rw,nosuid,size=1m"
+  ],
+
+  // Required: Don't override ENTRYPOINT (security entrypoint must run first)
+  "overrideCommand": false,
+
+  // Entrypoint runs as root (iptables), VS Code as "vscode" (remoteUser)
+  "containerUser": "root",
+
+  // -------------------------------------------------------------------------
+  // remoteEnv: Proxy routing + security env vars.
+  // HTTP(S)_PROXY: Route all traffic through Squid (upper+lowercase for compat)
+  // NO_PROXY: Bypass proxy for local/container traffic
+  // SSH_AUTH_SOCK="": Block host SSH key forwarding
+  // GIT_TERMINAL_PROMPT="0": Fail on missing credentials instead of prompting
+  // -------------------------------------------------------------------------
+  "remoteEnv": {
+    "HTTP_PROXY": "http://localhost:3128",
+    "HTTPS_PROXY": "http://localhost:3128",
+    "http_proxy": "http://localhost:3128",
+    "https_proxy": "http://localhost:3128",
+    "NO_PROXY": "localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16",
+    "no_proxy": "localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16",
+    "SSH_AUTH_SOCK": "",
+    "GIT_TERMINAL_PROMPT": "0",
+    "TMPDIR": "/home/vscode/.tmp"
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "github.copilot",
+        "github.copilot-chat",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ],
+
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+        "editor.formatOnSave": true,
+
+        // SECURITY: Disable SSH agent forwarding
+        "remote.SSH.enableAgentForwarding": false,
+
+        // SECURITY: Route VS Code traffic through Squid proxy
+        // (env vars alone are insufficient — extensions use this setting)
+        "http.proxy": "http://localhost:3128",
+        "http.proxyStrictSSL": true,
+        "http.proxySupport": "on"
+      }
+    }
+  },
+
+  // Common dev server ports (adjust as needed, or Cmd+Shift+P → "Forward a Port")
+  "forwardPorts": [3000, 5000, 8000, 8080],
+
+  // SECURITY: Ignore unlisted ports (prevents AI agent C2 channels)
+  "otherPortsAttributes": {
+    "onAutoForward": "ignore"
+  },
+
+  // Runs ONCE after container creation (not on restart)
+  "postCreateCommand": "bash .devcontainer/shared/post-create.sh",
+
+  // VS Code operates as non-root "vscode" user
+  "remoteUser": "vscode"
+}

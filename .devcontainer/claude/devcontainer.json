@@ -1,23 +1,43 @@
-// devcontainer.json – VS Code Dev Container configuration
+// devcontainer.json – Variant: Claude Code
 // Docs: https://containers.dev/implementors/json_reference/
+//
+// One of three variants (copilot / claude / both) sharing .devcontainer/shared/.
+// VS Code shows a picker on "Reopen in Container"; switch via "Rebuild Container".
+// Keep runArgs / remoteEnv / security settings IN SYNC with the sibling variants.
 {
-  "name": "Sandboxed Dev Environment",
+  "name": "Sandbox – Claude Code",
 
   "build": {
-    "dockerfile": "Dockerfile",
-    "context": "."
+    "dockerfile": "../shared/Dockerfile",
+    "context": "../shared"
   },
 
   // -------------------------------------------------------------------------
-  // features: Dev Container Features for language runtimes.
+  // features: Dev Container Features for language runtimes + Claude Code CLI.
   // Node.js is installed via the official feature (nvm-based, GPG-verified).
-  // Default version is 20; devs can switch with `nvm install <version>`.
+  // Claude Code is installed globally (not into $HOME, which is a tmpfs).
   // -------------------------------------------------------------------------
   "features": {
     "ghcr.io/devcontainers/features/node:1": {
       "version": "20"
-    }
+    },
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
   },
+  "overrideFeatureInstallOrder": [
+    "ghcr.io/devcontainers/features/node",
+    "ghcr.io/anthropics/devcontainer-features/claude-code"
+  ],
+
+  // Selects the egress allowlist: domains/common.conf + domains/<profile>.conf
+  "containerEnv": {
+    "AI_PROFILE": "claude"
+  },
+
+  // Persist Claude Code login + config across restarts/rebuilds.
+  // Wipe it with: docker volume rm claude-config-<devcontainerId>
+  "mounts": [
+    "source=claude-config-${devcontainerId},target=/home/vscode/.claude,type=volume"
+  ],
 
   // -------------------------------------------------------------------------
   // runArgs: Container runtime security and resource configuration.
@@ -26,7 +46,7 @@
   //           read-only root filesystem, resource limits.
   // Capabilities: DAC_OVERRIDE (VS Code Server),
   //               NET_ADMIN (iptables), SETUID/SETGID (Squid privilege drop),
-  //               CHOWN (Squid dir ownership).
+  //               CHOWN (Squid dir ownership, ~/.claude volume ownership).
   // tmpfs: Writable scratch space for /tmp, /run, /etc/squid, Squid logs,
   //        /home/vscode, /var/devcontainer.
   // -------------------------------------------------------------------------
@@ -64,6 +84,10 @@
   // NO_PROXY: Bypass proxy for local/container traffic
   // SSH_AUTH_SOCK="": Block host SSH key forwarding
   // GIT_TERMINAL_PROMPT="0": Fail on missing credentials instead of prompting
+  // CLAUDE_CONFIG_DIR: Keep all Claude state (incl. .claude.json) on the volume
+  // DISABLE_AUTOUPDATER: Root fs is read-only — update by rebuilding
+  // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: No telemetry/error reporting,
+  //   so only the domains in domains/claude.conf are needed
   // -------------------------------------------------------------------------
   "remoteEnv": {
     "HTTP_PROXY": "http://localhost:3128",
@@ -74,14 +98,16 @@
     "no_proxy": "localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16",
     "SSH_AUTH_SOCK": "",
     "GIT_TERMINAL_PROMPT": "0",
-    "TMPDIR": "/home/vscode/.tmp"
+    "TMPDIR": "/home/vscode/.tmp",
+    "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
+    "DISABLE_AUTOUPDATER": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   },
 
   "customizations": {
     "vscode": {
       "extensions": [
-        "github.copilot",
-        "github.copilot-chat",
+        "anthropic.claude-code",
         "ms-python.python",
         "ms-python.vscode-pylance",
         "dbaeumer.vscode-eslint",
@@ -114,7 +140,7 @@
   },
 
   // Runs ONCE after container creation (not on restart)
-  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postCreateCommand": "bash .devcontainer/shared/post-create.sh",
 
   // VS Code operates as non-root "vscode" user
   "remoteUser": "vscode"

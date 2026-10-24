@@ -1,7 +1,7 @@
 # Sandboxed Dev Container for AI-Assisted Development
 
-> A hardened, isolated development environment for VS Code with GitHub Copilot.
-> Restricts network egress, blocks privilege escalation, limits credential exposure, and prevents arbitrary binary execution and reducing the attack surface of AI agents like Copilot Agent Mode.
+> A hardened, isolated development environment for VS Code with **GitHub Copilot**, **Claude Code**, or both.
+> Restricts network egress, blocks privilege escalation, limits credential exposure, and prevents arbitrary binary execution, reducing the attack surface of AI agents like Copilot Agent Mode and Claude Code.
 
 ---
 
@@ -19,7 +19,7 @@ This repository is a **template**. It contains a fully configured `.devcontainer
 │  │   your       │    │  │  Container           │  │ │
 │  │   machine)   │    │  │  • Python 3.12       │  │ │
 │  │              │    │  │  • Node.js (nvm)     │  │ │
-│  │              │    │  │  • GitHub Copilot    │  │ │
+│  │              │    │  │  • Copilot / Claude  │  │ │
 │  │              │    │  │  • Egress Firewall   │  │ │
 │  │              │    │  │  • your project code │  │ │
 │  └──────────────┘    │  └──────────────────────┘  │ │
@@ -35,17 +35,30 @@ This repository is a **template**. It contains a fully configured `.devcontainer
 | **Python**       | pip, poetry, black, ruff, ipython (via pipx)                   |
 | **Node.js**      | npm, nvm (install any version with `nvm install <version>`)    |
 | **Git & GitHub** | Git                                                            |
-| **Editor**       | GitHub Copilot, Copilot Chat, Python/Pylance, ESLint, Prettier |
+| **AI Assistant** | GitHub Copilot + Chat and/or Claude Code (CLI + extension)     |
+| **Editor**       | Python/Pylance, ESLint, Prettier                               |
 | **Shell**        | zsh with Oh My Zsh                                             |
+
+## Choosing Your Assistant
+
+The template ships three variants that share one Dockerfile, firewall and set of security settings:
+
+| Variant                           | Folder                     | Installs                        | Extra egress allowed                 |
+| --------------------------------- | -------------------------- | ------------------------------- | ------------------------------------ |
+| **Sandbox – GitHub Copilot**      | `.devcontainer/copilot/`   | Copilot + Copilot Chat          | `domains/copilot.conf`               |
+| **Sandbox – Claude Code**         | `.devcontainer/claude/`    | Claude Code CLI + VS Code ext.  | `domains/claude.conf`                |
+| **Sandbox – Copilot + Claude Code** | `.devcontainer/both/`    | Both                            | Both files                           |
+
+When you run **"Dev Containers: Reopen in Container"**, VS Code asks which variant to use. **To switch**, run **"Dev Containers: Rebuild Container"** (or "Switch Container") and pick another one. Each variant only opens the network to the assistant it installs.
 
 ## Security Features
 
-This dev container is hardened and specifically addresses risks introduced by AI agents (Copilot Agent Mode, MCP tools, etc.):
+This dev container is hardened and specifically addresses risks introduced by AI agents (Copilot Agent Mode, Claude Code, MCP tools, etc.):
 
 | Measure                      | Details                                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------- |
 | **Rootless Container**       | Runs without host root privileges                                                                       |
-| **Capability Drop**          | All Linux capabilities removed, only `DAC_OVERRIDE`, `NET_ADMIN` allowed; SUID bits stripped            |
+| **Capability Drop**          | All capabilities dropped; only `DAC_OVERRIDE`, `NET_ADMIN`, `SETUID`, `SETGID`, `CHOWN` re-added; SUID bits stripped |
 | **No New Privileges**        | Processes cannot gain additional privileges                                                             |
 | **Egress Firewall**          | Outbound network traffic restricted to a domain whitelist (Squid proxy + iptables DEFAULT-DROP)         |
 | **SSH Agent Blocked**        | Host SSH keys are not available inside the container                                                    |
@@ -53,6 +66,7 @@ This dev container is hardened and specifically addresses risks introduced by AI
 | **Resource Limits**          | Memory (8 GB), CPUs (4), PIDs (512) - prevents DoS of the host                                          |
 | **Sudoers Removed**          | No `sudo` available inside the container                                                                |
 | **`.copilotignore`**         | Sensitive files are excluded from Copilot context                                                       |
+| **Claude Managed Settings**  | Read access to secret files (`.env`, keys, credentials) denied via read-only `/etc/claude-code/managed-settings.json` |
 | **Port Isolation**           | Only explicitly defined ports are forwarded                                                             |
 | **Read-Only Filesystem**     | Container root filesystem is read-only; only tmpfs and /workspaces writable                             |
 
@@ -60,12 +74,19 @@ This dev container is hardened and specifically addresses risks introduced by AI
 
 ```
 .devcontainer/
-├── devcontainer.json        # Main configuration for VS Code
-├── Dockerfile               # Image definition (Ubuntu 24.04 + tools)
-├── post-create.sh           # One-time setup after container creation
-├── entrypoint.sh            # Container entrypoint (runs firewall as root)
-├── egress-firewall.sh       # Squid proxy + iptables enforcement
-└── allowed-domains.conf     # List of allowed egress domains
+├── copilot/devcontainer.json        # Variant: GitHub Copilot
+├── claude/devcontainer.json         # Variant: Claude Code
+├── both/devcontainer.json           # Variant: Copilot + Claude Code
+└── shared/
+    ├── Dockerfile                   # Image definition (Ubuntu 24.04 + tools)
+    ├── entrypoint.sh                # Container entrypoint (runs firewall as root)
+    ├── egress-firewall.sh           # Squid proxy + iptables enforcement
+    ├── post-create.sh               # One-time setup after container creation
+    ├── claude-managed-settings.json # Claude Code deny rules (secret files)
+    └── domains/
+        ├── common.conf              # Allowed egress domains for every variant
+        ├── copilot.conf             # + GitHub Copilot domains
+        └── claude.conf              # + Claude Code domains
 
 .copilotignore               # Files excluded from Copilot analysis
 .gitignore                   # Files excluded from version control
@@ -130,9 +151,9 @@ Copy-Item github-copilot-vscode-sandbox-container\.gitattributes \path\to\your\p
 
 ### 2. Configure allowed domains
 
-The egress firewall blocks all outbound traffic except to explicitly whitelisted domains. By default, **only domains required for VS Code, GitHub Copilot, and package managers (npm, PyPI, apt) are enabled**.
+The egress firewall blocks all outbound traffic except to explicitly whitelisted domains. By default, **only domains required for VS Code, GitHub, the chosen AI assistant, and package managers (npm, PyPI, apt) are enabled**.
 
-If your project uses additional services (Azure, Azure DevOps, Figma, Miro, Notion, etc.), you need to **uncomment the corresponding domains** in `.devcontainer/allowed-domains.conf`:
+If your project uses additional services (Azure, Azure DevOps, Figma, Miro, Notion, etc.), you need to **uncomment the corresponding domains** in `.devcontainer/shared/domains/common.conf`:
 
 ```conf
 # Example: Enable Azure DevOps for the ADO MCP server
@@ -144,19 +165,33 @@ If your project uses additional services (Azure, Azure DevOps, Figma, Miro, Noti
 
 After editing, restart the container (`Cmd+Shift+P` / `Ctrl+Shift+P` → **"Dev Containers: Rebuild Container"**).
 
-> **⚠️ Security:** Wildcard domains (`*.example.com`) grant access to **all** subdomains, including potentially attacker-controlled ones. For example, `*.blob.core.windows.net` allows any Azure Storage account. Where possible, narrow wildcards to your specific instances (e.g., `myaccount.blob.core.windows.net`). See [Known Limitations → Wildcard Domains](#4-wildcard-domains-in-allowed-domainsconf) for details.
+> **⚠️ Security:** Wildcard domains (`*.example.com`) grant access to **all** subdomains, including potentially attacker-controlled ones. For example, `*.blob.core.windows.net` allows any Azure Storage account. Where possible, narrow wildcards to your specific instances (e.g., `myaccount.blob.core.windows.net`). See [Known Limitations → Wildcard Domains](#3-wildcard-domains) for details.
 
 ### 3. Start the container
 
 1. Open your project in VS Code
 2. `Cmd+Shift+P` (macOS) / `Ctrl+Shift+P` (Linux/Windows)
 3. Select **"Dev Containers: Reopen in Container"**
-4. The first time, the image will be built (~3–5 minutes)
+4. Pick a variant: **Sandbox – GitHub Copilot**, **Sandbox – Claude Code**, or **Sandbox – Copilot + Claude Code**
+5. The first time, the image will be built (~3–5 minutes)
 
 **How do you know you're inside the container?**
 
-- The status bar (bottom left) shows: `Dev Container: Sandboxed Dev Environment`
+- The status bar (bottom left) shows the variant name, e.g. `Dev Container: Sandbox – Claude Code`
 - The terminal shows a zsh shell with Oh My Zsh
+
+---
+
+# Using Claude Code
+
+Available in the **Claude Code** and **Copilot + Claude Code** variants.
+
+- **Log in once:** run `claude` in the terminal (or open the Claude Code panel) and use `/login`. Open the printed URL in your host browser and paste the code back. A Claude subscription and an Anthropic Console account both work.
+- **Login persists** in a per-container Docker volume (`claude-config-<id>`) mounted at `~/.claude`. Everything else in `/home/vscode` is a tmpfs and is wiped on restart. To log out completely, delete the volume: `docker volume ls | grep claude-config` → `docker volume rm <name>`.
+- **Permissions:** Claude Code asks before running commands or editing files, as usual. Reading secret files (`.env`, `*.pem`, `*.key`, credentials, `.npmrc`, …) is **denied** by `/etc/claude-code/managed-settings.json`. That file is baked into the read-only image, so neither you nor the agent can override it from inside the container. Edit `.devcontainer/shared/claude-managed-settings.json` and rebuild to change it.
+- **Skipping prompts** (`claude --dangerously-skip-permissions`) is possible, because the sandbox is the safety boundary. But the agent can then freely use every whitelisted domain, for example to push to GitHub or publish to npm. Use it deliberately.
+- **Updates:** auto-update is disabled (the root filesystem is read-only). Rebuild the container to get the latest Claude Code.
+- **Network:** nonessential traffic (telemetry, error reporting) is disabled, so only the domains in `domains/claude.conf` are needed. If Claude reports connection errors, check `grep DENIED /var/log/squid/access.log`.
 
 ---
 
@@ -206,9 +241,10 @@ Add this setting to your VS Code User Settings (JSON) via `Cmd+Shift+P` (macOS) 
 
 ## Egress Firewall: Allowing Domains
 
-The file `.devcontainer/allowed-domains.conf` defines which external domains the container can reach. The following are **enabled by default** (minimum required):
+The files in `.devcontainer/shared/domains/` define which external domains the container can reach. `common.conf` is always loaded. Each variant adds its assistant's file (`copilot.conf`, `claude.conf`, or both), selected by the `AI_PROFILE` value in the variant's `containerEnv`. The following are **enabled by default** (minimum required):
 
-- **GitHub** - Copilot, Git, API
+- **GitHub** - Git, API (all variants); Copilot (copilot/both)
+- **Anthropic** - Claude API and login (claude/both)
 - **npm**, **Node.js** and **PyPI** - package installation
 - **Ubuntu Repos** - apt
 - **VS Code / Microsoft** - extensions, updates
@@ -218,11 +254,11 @@ The following are **disabled by default** (commented out) and can be enabled as 
 - **Azure** - Portal, APIs, DevOps, Storage, Key Vault
 - **Figma, Miro, Notion, Amplitude** - MCP servers
 
-To enable additional domains, uncomment them in `allowed-domains.conf` and restart the container. See [Quick Start Step 3](#3-configure-allowed-domains) for details and [Known Limitations → Wildcard Domains](#4-wildcard-domains-in-allowed-domainsconf) for security implications.
+To enable additional domains, uncomment them in `domains/common.conf` and rebuild the container. See [Quick Start Step 2](#2-configure-allowed-domains) for details and [Known Limitations → Wildcard Domains](#3-wildcard-domains) for security implications.
 
 ## Adjusting Resource Limits
 
-In `.devcontainer/devcontainer.json` under `runArgs`:
+In each variant's `devcontainer.json` under `runArgs`. The three variants intentionally duplicate their security and resource settings, because `devcontainer.json` has no include mechanism. **Keep them in sync.**
 
 ```jsonc
 "--memory=8g",      // RAM limit (adjust for your machine)
@@ -232,7 +268,7 @@ In `.devcontainer/devcontainer.json` under `runArgs`:
 
 ## Port Forwarding
 
-Ports `3000`, `5000`, `8000`, `8080` are forwarded by default. Adjust in `devcontainer.json` under `forwardPorts`. Additional ports can be forwarded manually in VS Code (`Cmd+Shift+P` (macOS) / `Ctrl+Shift+P` (Windows/Linux) → "Forward a Port").
+Ports `3000`, `5000`, `8000`, `8080` are forwarded by default. Adjust in each variant's `devcontainer.json` under `forwardPorts`. Additional ports can be forwarded manually in VS Code (`Cmd+Shift+P` (macOS) / `Ctrl+Shift+P` (Windows/Linux) → "Forward a Port").
 
 ## Disabling Network Access (Offline Mode)
 
@@ -242,7 +278,7 @@ Add this to `runArgs` in `devcontainer.json`:
 "--network=none"
 ```
 
-> ⚠️ **Warning:** Copilot, pip, and npm require internet access. Only use this if all dependencies are pre-installed.
+> ⚠️ **Warning:** Copilot, Claude Code, pip, and npm require internet access. Only use this if all dependencies are pre-installed.
 
 ---
 
@@ -251,10 +287,11 @@ Add this to `runArgs` in `devcontainer.json`:
 ## Container Startup Flow
 
 ```
-1. Container starts as root (containerUser: root)
+1. Container starts as root (containerUser: root), with AI_PROFILE set by the variant
 2. entrypoint.sh is executed:
    └── egress-firewall.sh configures Squid proxy
-       ├── Domains from allowed-domains.conf → Squid ACL
+       ├── domains/common.conf + domains/<AI_PROFILE>.conf → Squid ACL
+       │   (unknown profile or missing file → startup ABORTS)
        ├── Squid proxy starts on localhost:3128
        ├── iptables DROP rules (only proxy user can reach internet)
        └── If Squid fails → container startup ABORTS (fail-closed)
@@ -286,13 +323,14 @@ Even with perfect egress filtering, whitelisted domains can be used as exfiltrat
 | Channel            | Domain                    | Method                              |
 | ------------------ | ------------------------- | ----------------------------------- |
 | GitHub Gist/API    | `github.com`              | `POST https://api.github.com/gists` |
+| Anthropic API      | `api.anthropic.com`       | Requests with another account's API key |
 | Azure Blob Storage | `*.blob.core.windows.net` | Upload to any storage account       |
 | Notion API         | `api.notion.com`          | Create pages with data              |
 | npm Publish        | `registry.npmjs.org`      | Publish package with data           |
 
 This is an inherent trade-off: blocking these domains would break core functionality (Git, package installation, MCP servers). For environments handling highly sensitive data, consider a content-inspection proxy (e.g., mitmproxy) for deep packet inspection.
 
-**Mitigation:** Review and narrow the domain whitelist in `allowed-domains.conf` for your use case. Remove domains for services you don't use (Figma, Miro, Notion, Amplitude). Replace broad Azure wildcards (`*.blob.core.windows.net`) with your specific account URLs where possible.
+**Mitigation:** Review and narrow the domain whitelist in `domains/*.conf` for your use case. Remove domains for services you don't use (Figma, Miro, Notion, Amplitude). Replace broad Azure wildcards (`*.blob.core.windows.net`) with your specific account URLs where possible.
 
 ### 2. DNS Tunneling
 
@@ -302,17 +340,17 @@ Direct DNS queries to external DNS servers are **blocked and logged** - only the
 
 > **Monitoring tip:** Check for blocked direct DNS attempts with `dmesg | grep EGRESS_BLOCKED_DNS`.
 
-#### 3. Wildcard Domains in allowed-domains.conf
+### 3. Wildcard Domains
 
-Some entries in `allowed-domains.conf` use wildcards (e.g., `*.blob.core.windows.net`, `*.visualstudio.com`). These grant access to **all** subdomains, including potentially attacker-controlled ones.
+Some entries in `domains/*.conf` use wildcards (e.g., `*.blob.core.windows.net`, `*.visualstudio.com`). These grant access to **all** subdomains, including potentially attacker-controlled ones.
 
-**Important:** Domains in `allowed-domains.conf` without a `*` prefix match **only the exact domain** - subdomains are not automatically included. If you need subdomains, use the explicit `*.example.com` syntax. Review the domain list and narrow wildcards to specific instances where possible.
+**Important:** Domains without a `*` prefix match **only the exact domain** - subdomains are not automatically included. If you need subdomains, use the explicit `*.example.com` syntax. Review the domain list and narrow wildcards to specific instances where possible.
 
-#### 4. No MCP Server Restrictions
+### 4. No MCP Server Restrictions
 
-The dev container does not restrict which [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) servers can be used by Copilot Agent Mode. Any MCP server that connects to a whitelisted domain will work. Organizations should define MCP server policies via GitHub Enterprise Copilot settings or VS Code organizational policies.
+The dev container does not restrict which [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) servers can be used by Copilot Agent Mode or Claude Code. Any MCP server that connects to a whitelisted domain will work. Organizations should define MCP server policies via GitHub Enterprise Copilot settings, VS Code organizational policies, or Claude Code managed settings (`claude-managed-settings.json`).
 
-#### 5. Git Credentials
+### 5. Git Credentials
 
 Git credentials are cached for 60 seconds after explicit authentication by the user. During this window, any process (including AI agents) can perform Git operations. The host's credential helper is **not** forwarded - only the short-lived in-memory cache is available.
 
@@ -321,20 +359,25 @@ Git credentials are cached for 60 seconds after explicit authentication by the u
 - Reduce timeout further: Change `--timeout=60` to a lower value in `post-create.sh`
 - Disable entirely: Set `git config --global credential.helper ''` - but this means `git push` / `git pull` to private repos will not work at all (since `GIT_TERMINAL_PROMPT=0` prevents interactive prompts)
 
-#### 6. Package Installation (Supply Chain)
+### 6. Package Installation (Supply Chain)
 
 PyPI and npm registries are whitelisted, allowing AI agents to install arbitrary packages. Malicious or typosquatted packages can execute arbitrary code via post-install scripts.
 
 **Mitigation:** Use a private package registry with curation (e.g., Artifactory, Nexus), `pip install --require-hashes`, or restrict registry access to specific packages.
 
-### 8. Writable Project Directory (`/workspaces`)
+### 7. Writable Project Directory (`/workspaces`)
 
 The `/workspaces` directory is writable by design - AI agents need to create and modify project files. However, this also allows:
 
 - **Git hook manipulation:** An agent can create or modify `.git/hooks/pre-commit` (or other hooks) to execute arbitrary code on the next `git commit`.
+- **Claude Code hooks/settings:** An agent can write `.claude/settings.json` in the project, adding hooks that run shell commands or `allow` rules that skip prompts. Managed deny rules still win, but hooks run with your user's rights.
 - **Config file changes:** `.vscode/settings.json`, `.env` files, or CI/CD configs can be modified silently.
 
-**Mitigation:** Use `core.hooksPath` pointing to a read-only directory for Git hooks. Always review AI-generated changes before committing - treat agent output like an untrusted pull request.
+**Mitigation:** Use `core.hooksPath` pointing to a read-only directory for Git hooks. Review changes to `.claude/` like any other code. To forbid project hooks entirely, add `"allowManagedHooksOnly": true` to `claude-managed-settings.json`. Always review AI-generated changes before committing - treat agent output like an untrusted pull request.
+
+### 8. Persisted Claude Credentials
+
+The Claude Code login token lives in the `claude-config-<id>` Docker volume, so any process in the container can read it while the container runs. It also survives rebuilds. Delete the volume when you're done with a project, or log in with a scoped Console API key instead of a personal subscription.
 
 ## Potential Improvements
 
@@ -363,7 +406,7 @@ docker system prune -a
 
 ## Network Issues (Domain Blocked)
 
-The egress firewall blocks non-whitelisted domains. Check `.devcontainer/allowed-domains.conf`, add the missing domains, and restart the container.
+The egress firewall blocks non-whitelisted domains. Find what was blocked with `grep DENIED /var/log/squid/access.log`, add the missing domains to `.devcontainer/shared/domains/common.conf` (or the assistant-specific file), and rebuild the container.
 
 ## "Permission denied" Inside the Container
 
@@ -390,8 +433,8 @@ This means shell scripts have Windows-style line endings (CRLF instead of LF). T
 
 ```powershell
 # Fix line endings in existing files (Git Bash or WSL)
-sed -i 's/\r$//' .devcontainer/*.sh
-sed -i 's/\r$//' .devcontainer/allowed-domains.conf
+sed -i 's/\r$//' .devcontainer/shared/*.sh
+sed -i 's/\r$//' .devcontainer/shared/domains/*.conf
 
 # Or re-clone with correct settings
 git config --global core.autocrlf input

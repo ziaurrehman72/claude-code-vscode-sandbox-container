@@ -15,6 +15,11 @@ set -euo pipefail
 # Server, shell config, pipx, etc.
 chown vscode:vscode /home/vscode
 
+# Claude Code config volume (claude/both variants) is created root-owned.
+if [ -d /home/vscode/.claude ]; then
+    chown vscode:vscode /home/vscode/.claude
+fi
+
 # ── Create TMPDIR for vscode user ────────────────────────────────────────────
 # /tmp is mounted noexec to prevent AI agents from downloading and executing
 # arbitrary binaries. Build tools (pip, node-gyp) that need exec use TMPDIR
@@ -35,14 +40,12 @@ touch /var/devcontainer/.patchEtcProfileMarker
 # Activate egress firewall (Squid proxy + iptables enforcement)
 # SECURITY: Fail-closed — if the firewall cannot be activated, the container
 # must NOT start. This prevents running without egress filtering.
-if [ -x /usr/local/bin/egress-firewall.sh ]; then
-    /usr/local/bin/egress-firewall.sh || {
-        echo "❌ FATAL: Egress firewall could not be activated!"
-        echo "   The container will NOT start without egress filtering."
-        echo "   Ensure NET_ADMIN capability is available."
-        exit 1
-    }
-fi
+/usr/local/bin/egress-firewall.sh || {
+    echo "❌ FATAL: Egress firewall could not be activated!"
+    echo "   The container will NOT start without egress filtering."
+    echo "   Ensure NET_ADMIN capability is available and AI_PROFILE is valid."
+    exit 1
+}
 
 # Hand off to the original command
 exec "$@"

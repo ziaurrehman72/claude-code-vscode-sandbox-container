@@ -60,9 +60,15 @@ RUN find / -path /proc -prune -o -path /sys -prune -o -type f -perm /6000 -print
 
 
 # --- SECURITY: Egress firewall script (runs at container start via entrypoint) ---
-COPY allowed-domains.conf /usr/local/etc/allowed-domains.conf
+# Domain files: common.conf + per-assistant files, selected at runtime by AI_PROFILE.
+COPY domains/ /usr/local/etc/allowed-domains.d/
 COPY egress-firewall.sh /usr/local/bin/egress-firewall.sh
 RUN chmod +x /usr/local/bin/egress-firewall.sh
+
+# --- SECURITY: Claude Code managed settings (deny reads of secret files) ---
+# Lives on the read-only root fs, so the agent cannot edit it. Managed settings
+# take precedence over user/project settings. Harmless when Claude isn't installed.
+COPY claude-managed-settings.json /etc/claude-code/managed-settings.json
 
 # --- SECURITY: Entrypoint + /etc/environment for --read-only mode ---
 # Pre-populate /etc/environment (VS Code can't patch it on read-only fs).

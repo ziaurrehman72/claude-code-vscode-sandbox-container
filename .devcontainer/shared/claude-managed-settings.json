@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.secret)",
+      "Read(**/*.secrets)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/*.p12)",
+      "Read(**/*.pfx)",
+      "Read(**/*.jks)",
+      "Read(**/*.keystore)",
+      "Read(**/.ssh/**)",
+      "Read(**/id_rsa)",
+      "Read(**/id_ed25519)",
+      "Read(**/id_ecdsa)",
+      "Read(**/credentials*)",
+      "Read(**/secrets.json)",
+      "Read(**/auth.json)",
+      "Read(**/.npmrc)",
+      "Read(**/.yarnrc)",
+      "Read(**/.pypirc)",
+      "Read(**/.netrc)",
+      "Read(**/.aws/**)",
+      "Read(**/.azure/**)",
+      "Read(**/.gcloud/**)",
+      "Read(**/kubeconfig*)",
+      "Read(**/*.tfvars)",
+      "Read(**/*.tfstate)",
+      "Read(**/*.tfstate.backup)",
+      "Read(**/.docker/config.json)",
+      "Read(**/docker-secrets/**)",
+      "Read(**/vault-token*)"
+    ]
+  }
+}
