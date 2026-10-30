@@ -41,8 +41,12 @@ RUN apt-get update \
 
 
 # --- SECURITY: Squid proxy + iptables for domain-based egress filtering ---
+# squid-openssl (not the GnuTLS "squid" build): some clients send full-URL
+# HTTPS requests instead of CONNECT tunnels, e.g. the Claude Code VS Code
+# extension's login token exchange. Only the OpenSSL build can forward those,
+# and it verifies server certificates against the system CA store.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends squid iptables \
+    && apt-get install -y --no-install-recommends squid-openssl iptables \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/log/squid /var/spool/squid /var/cache/squid \
     && chown -R proxy:proxy /var/log/squid /var/spool/squid /var/cache/squid
